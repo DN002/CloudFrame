@@ -183,7 +183,6 @@ public class Quarry {
             }
         }
 
-
         if (shouldLog) {
             debug.log("tick", "Tick at (" + currentX + "," + currentY + "," + currentZ + ")");
         }

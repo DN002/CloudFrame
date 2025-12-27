@@ -1,0 +1,11 @@
+name: CloudFrame
+main: dev.cloudframe.cloudframe.CloudFrame
+version: 0.0.2
+api-version: 1.21
+author: Cynical_Chris
+description: CloudFrame — modular quarry + tube transport system.
+
+commands:
+  cloudframe:
+    description: CloudFrame utility command
+    usage: /cloudframe give <item>

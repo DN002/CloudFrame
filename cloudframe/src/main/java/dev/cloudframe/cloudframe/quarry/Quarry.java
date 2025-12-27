@@ -176,13 +176,13 @@ public class Quarry {
 
         // If current position is invalid or empty, find the next block
         Material typeAtPos = world.getBlockAt(currentX, currentY, currentZ).getType();
-        if (typeAtPos == Material.AIR || !typeAtPos.isSolid() || typeAtPos == Material.BEDROCK) {
+        if (typeAtPos == Material.AIR || typeAtPos == Material.BEDROCK) {
             if (!findNextBlockToMine(shouldLog)) {
-                // Nothing left to mine — stay idle
                 if (shouldLog) debug.log("tick", "Region empty — idle");
                 return;
             }
         }
+
 
         if (shouldLog) {
             debug.log("tick", "Tick at (" + currentX + "," + currentY + "," + currentZ + ")");
@@ -191,13 +191,19 @@ public class Quarry {
         Block block = world.getBlockAt(currentX, currentY, currentZ);
         Material type = block.getType();
 
-        // Mine only valid blocks
-        if (type != Material.AIR && type.isSolid() && type != Material.BEDROCK) {
+        if (type != Material.AIR && type != Material.BEDROCK) {
+
             if (shouldLog) {
                 debug.log("tick", "Mining block " + type +
                         " at (" + currentX + "," + currentY + "," + currentZ + ")");
             }
-            outputBuffer.add(new ItemStack(type));
+
+            // Only add solid blocks to output buffer
+            if (type.isSolid()) {
+                outputBuffer.add(new ItemStack(type));
+            }
+
+            // Replace everything (including fluids) with air
             block.setType(Material.AIR);
             blocksMined++;
         }

@@ -49,6 +49,9 @@ public class Quarry {
     private boolean[] emptyLayers;
     private boolean scanningMetadata = false;
 
+    // Scanning state (when region is empty but quarry is active)
+    private boolean isScanning = false;
+
     private final List<ItemStack> outputBuffer = new ArrayList<>();
 
     public Quarry(UUID owner, Location posA, Location posB, Region region, Location controller) {
@@ -156,6 +159,10 @@ public class Quarry {
         return scanningMetadata;
     }
 
+    public boolean isScanning() {
+        return isScanning;
+    }
+
     public int[] getBlocksPerLayer() {
         return blocksPerLayer != null ? blocksPerLayer : new int[0];
     }
@@ -188,9 +195,14 @@ public class Quarry {
         Material typeAtPos = world.getBlockAt(currentX, currentY, currentZ).getType();
         if (!isMineable(typeAtPos)) {
             if (!findNextBlockToMine(shouldLog)) {
-                if (shouldLog) debug.log("tick", "Region empty — idle");
+                if (shouldLog) debug.log("tick", "Region empty — scanning");
+                isScanning = true;
                 return;
+            } else {
+                isScanning = false;
             }
+        } else {
+            isScanning = false;
         }
 
         if (shouldLog) {
@@ -206,7 +218,10 @@ public class Quarry {
                         " at (" + currentX + "," + currentY + "," + currentZ + ")");
             }
 
-            outputBuffer.add(new ItemStack(type));
+            // Only add to output buffer if it's not a fluid
+            if (type != Material.WATER && type != Material.LAVA) {
+                outputBuffer.add(new ItemStack(type));
+            }
             block.setType(Material.AIR);
             blocksMined++;
         }
@@ -356,10 +371,85 @@ public class Quarry {
             scanY--;
         }
 
-        if (shouldLog) debug.log("findNextBlockToMine", "No blocks left in region");
+        // Region complete — reset to top and restart scan
+        if (shouldLog) debug.log("findNextBlockToMine", "Region scan complete, resetting to top");
+        resetScanPosition();
+        
+        // Try one more pass from the top
+        return findNextBlockToMineFromTop(shouldLog);
+    }
+
+    private boolean findNextBlockToMineFromTop(boolean shouldLog) {
+        World world = region.getWorld();
+
+        int minX = region.minX();
+        int maxX = region.maxX();
+        int minZ = region.minZ();
+        int maxZ = region.maxZ();
+
+        for (int y = region.maxY(); y >= region.minY(); y--) {
+            for (int x = minX; x <= maxX; x++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    Material type = world.getBlockAt(x, y, z).getType();
+                    
+                    if (isMineable(type)) {
+                        currentX = x;
+                        currentY = y;
+                        currentZ = z;
+                        
+                        if (shouldLog) {
+                            debug.log("findNextBlockToMineFromTop",
+                                    "Found block " + type + " at (" + x + "," + y + "," + z + ")");
+                        }
+                        return true;
+                    }
+                }
+            }
+        }
+
+        if (shouldLog) debug.log("findNextBlockToMineFromTop", "No blocks found in region - empty");
         return false;
     }
 
+    private void resetScanPosition() {
+        this.scanX = region.minX();
+        this.scanZ = region.minZ();
+        this.scanY = region.maxY();
+        
+        // Reset layer tracking
+        for (int i = 0; i < layerHasBlocks.length; i++) {
+            layerScanned[i] = false;
+        }
+        
+        debug.log("resetScanPosition", "Scan position reset to top");
+    }
+
+        public int countLayersWithBlocks() {
+            // Count layers that still have mineable blocks (live check)
+            if (blocksPerLayer == null || blocksPerLayer.length == 0) {
+                return 0;
+            }
+
+            World world = region.getWorld();
+            int layersRemaining = 0;
+
+            for (int layer = 0; layer < blocksPerLayer.length; layer++) {
+                int y = region.maxY() - layer;
+
+                for (int x = region.minX(); x <= region.maxX(); x++) {
+                    for (int z = region.minZ(); z <= region.maxZ(); z++) {
+                        Material type = world.getBlockAt(x, y, z).getType();
+                        if (isMineable(type)) {
+                            layersRemaining++;
+                            break;
+                        }
+                    }
+                    if (layersRemaining > 0) break; // Found a block in this layer, move to next layer
+                }
+            }
+
+            return layersRemaining;
+        }
     private void computeTotalBlocks() {
         if (totalBlocksInRegion > 0) return;
 
@@ -390,6 +480,30 @@ public class Quarry {
         buildSnapshotAsync(region.maxY(), new ArrayList<>());
     }
 
+        public void resetMetadataAndProgress() {
+            // Reset mining progress
+            this.blocksMined = 0;
+            this.totalBlocksInRegion = 0;
+        
+            // Reset scan position
+            this.scanX = region.minX();
+            this.scanZ = region.minZ();
+            this.scanY = region.maxY();
+        
+            // Reset layer tracking
+            for (int i = 0; i < layerHasBlocks.length; i++) {
+                layerHasBlocks[i] = false;
+                layerScanned[i] = false;
+            }
+        
+            // Reset metadata
+            metadataReady = false;
+        
+            // Start fresh metadata scan
+            startMetadataScan();
+        
+            debug.log("resetMetadataAndProgress", "Reset metadata and progress");
+        }
     private void buildSnapshotAsync(int y, List<Material> snapshot) {
         World world = region.getWorld();
 

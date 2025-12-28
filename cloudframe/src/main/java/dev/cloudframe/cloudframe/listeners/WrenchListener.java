@@ -34,7 +34,22 @@ public class WrenchListener implements Listener {
         Location clicked = e.getClickedBlock().getLocation();
         debug.log("onInteract", "Player " + p.getName() + " used Cloud Wrench at " + clicked);
 
-        // Must have both marker positions
+        // Check if clicking a copper block (unregistered quarry controller)
+        if (e.getClickedBlock().getType() == Material.COPPER_BLOCK) {
+            // Check if this block is already a registered controller
+            for (Quarry q : CloudFrameRegistry.quarries().all()) {
+                if (q.getController().equals(clicked)) {
+                    debug.log("onInteract", "Clicked block is already a registered controller");
+                    return; // Already registered, let ControllerListener handle it
+                }
+            }
+
+            // This is a placed controller block that needs to be registered
+            finalizeQuarryWithBlock(p, clicked, e);
+            return;
+        }
+
+        // Must have both marker positions for frame creation
         if (!CloudFrameRegistry.markers().hasBoth(p.getUniqueId())) {
             debug.log("onInteract", "Player " + p.getName() + " missing marker positions");
             p.sendMessage("§cYou must set both marker positions first.");
@@ -166,5 +181,88 @@ public class WrenchListener implements Listener {
             }
         }
         debug.log("buildBorder", "Border built at Y=" + y + " for region " + r);
+    }
+
+    private void finalizeQuarryWithBlock(Player p, Location controllerLoc, PlayerInteractEvent e) {
+        debug.log("finalizeQuarryWithBlock", "Finalizing quarry at placed controller " + controllerLoc);
+
+        // Must have both marker positions
+        if (!CloudFrameRegistry.markers().hasBoth(p.getUniqueId())) {
+            debug.log("finalizeQuarryWithBlock", "Player " + p.getName() + " missing marker positions");
+            p.sendMessage("§cYou must set both marker positions first.");
+            return;
+        }
+
+        // Get marker positions
+        Location a = CloudFrameRegistry.markers().getPosA(p.getUniqueId());
+        Location b = CloudFrameRegistry.markers().getPosB(p.getUniqueId());
+        Region region = new Region(a, b);
+
+        debug.log("finalizeQuarryWithBlock", "Raw region: " + region);
+
+        // Expand region vertically: top = controller Y, bottom = world min height
+        int topY = controllerLoc.getBlockY();
+        int bottomY = region.getWorld().getMinHeight();
+
+        region = new Region(
+                new Location(region.getWorld(), region.minX(), bottomY, region.minZ()),
+                new Location(region.getWorld(), region.maxX(), topY, region.maxZ())
+        );
+
+        debug.log("finalizeQuarryWithBlock", "Expanded vertical region: " + region);
+
+        // Validate size
+        if (region.width() != QUARRY_SIZE || region.length() != QUARRY_SIZE) {
+            debug.log("finalizeQuarryWithBlock", "Invalid quarry size: width=" + region.width() +
+                    " length=" + region.length());
+            p.sendMessage("§cQuarry must be exactly " + QUARRY_SIZE + "x" + QUARRY_SIZE + ".");
+            return;
+        }
+
+        // Check overlap with existing quarries
+        for (Quarry q : CloudFrameRegistry.quarries().all()) {
+            if (q.getRegion().intersects(region)) {
+                debug.log("finalizeQuarryWithBlock", "Quarry overlap detected with existing quarry owner=" + q.getOwner());
+                p.sendMessage("§cThis quarry overlaps an existing quarry.");
+                return;
+            }
+        }
+
+        // Validate controller is on border
+        boolean onBorder =
+                controllerLoc.getBlockX() == region.minX() ||
+                controllerLoc.getBlockX() == region.maxX() ||
+                controllerLoc.getBlockZ() == region.minZ() ||
+                controllerLoc.getBlockZ() == region.maxZ();
+
+        if (!onBorder) {
+            debug.log("finalizeQuarryWithBlock", "Controller not on border: " + controllerLoc);
+            p.sendMessage("§cController must be placed on the border of the quarry frame.");
+            return;
+        }
+
+        // Build border
+        debug.log("finalizeQuarryWithBlock", "Building quarry border for region " + region);
+        buildBorder(region);
+
+        // Register quarry with the placed copper block as controller
+        Quarry quarry = new Quarry(
+                p.getUniqueId(),
+                a,
+                b,
+                region,
+                controllerLoc
+        );
+
+        CloudFrameRegistry.quarries().register(quarry);
+        debug.log("finalizeQuarryWithBlock", "Registered new quarry for owner=" + p.getUniqueId());
+
+        p.sendMessage("§aQuarry frame finalized.");
+
+        // Clear markers
+        CloudFrameRegistry.markers().clear(p.getUniqueId());
+        debug.log("finalizeQuarryWithBlock", "Cleared markers for " + p.getName());
+
+        e.setCancelled(true);
     }
 }

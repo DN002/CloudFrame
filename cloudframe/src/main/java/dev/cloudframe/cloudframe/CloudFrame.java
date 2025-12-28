@@ -44,6 +44,7 @@ public class CloudFrame extends JavaPlugin {
         // Create engine + managers
         CloudFrameEngine engine = new CloudFrameEngine(this);
         CloudFrameRegistry.init(engine);
+        CloudFrameRegistry.init(this); // Set plugin reference for scheduler
 
         // Load saved data BEFORE ticking begins
         CloudFrameRegistry.tubes().loadAll();
@@ -55,6 +56,9 @@ public class CloudFrame extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new WrenchListener(), this);
         getServer().getPluginManager().registerEvents(new ControllerListener(), this);
         getServer().getPluginManager().registerEvents(new ControllerGuiListener(), this);
+
+        // Start GUI update task
+        ControllerGuiListener.startGuiUpdateTask();
 
         // Register commands safely
         if (getCommand("cloudframe") != null) {
@@ -76,6 +80,9 @@ public class CloudFrame extends JavaPlugin {
             CloudFrameRegistry.quarries().saveAll();
             CloudFrameRegistry.tubes().saveAll();
         }
+
+        // Stop GUI update task
+        ControllerGuiListener.stopGuiUpdateTask();
 
         // Close SQLite connection
         Database.close();

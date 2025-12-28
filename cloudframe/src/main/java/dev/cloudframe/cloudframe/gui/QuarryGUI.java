@@ -39,6 +39,8 @@ public class QuarryGUI {
             sLore.add("§7State: §eScanning Metadata...");
         } else if (!q.isActive()) {
             sLore.add("§7State: §cPaused");
+        } else if (q.isScanning()) {
+            sLore.add("§7State: §eScanning Region");
         } else if (q.getProgressPercent() >= 100.0) {
             sLore.add("§7State: §aIdle (Complete)");
         } else {
@@ -83,10 +85,7 @@ public class QuarryGUI {
         }
 
         if (q.getBlocksPerLayer().length > 0) {
-            int layersRemaining = 0;
-            for (int count : q.getBlocksPerLayer()) {
-                if (count > 0) layersRemaining++;
-            }
+            int layersRemaining = q.countLayersWithBlocks();
             mLore.add("§7Layers Remaining: §f" + layersRemaining);
         }
 

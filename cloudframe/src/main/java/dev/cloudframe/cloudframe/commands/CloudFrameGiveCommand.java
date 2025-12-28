@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 import dev.cloudframe.cloudframe.items.MarkerTool;
 import dev.cloudframe.cloudframe.items.WrenchTool;
 import dev.cloudframe.cloudframe.items.TubeItem;
+import dev.cloudframe.cloudframe.items.QuarryControllerBlock;
 import dev.cloudframe.cloudframe.util.Debug;
 import dev.cloudframe.cloudframe.util.DebugManager;
 
@@ -29,14 +30,14 @@ public class CloudFrameGiveCommand implements CommandExecutor {
 
         if (args.length < 2) {
             debug.log("onCommand", "Invalid usage — missing arguments");
-            p.sendMessage("§eUsage: /cloudframe give <marker|wrench|tube>");
+            p.sendMessage("§eUsage: /cloudframe give <marker|wrench|tube|controller>");
             return true;
         }
 
         // Require the "give" subcommand
         if (!args[0].equalsIgnoreCase("give")) {
             debug.log("onCommand", "Invalid subcommand: " + args[0]);
-            p.sendMessage("§eUsage: /cloudframe give <marker|wrench|tube>");
+            p.sendMessage("§eUsage: /cloudframe give <marker|wrench|tube|controller>");
             return true;
         }
 
@@ -59,10 +60,15 @@ public class CloudFrameGiveCommand implements CommandExecutor {
                 p.getInventory().addItem(TubeItem.create());
                 p.sendMessage("§aGiven Cloud Tube.");
             }
+            case "controller" -> {
+                debug.log("onCommand", "Giving Quarry Controller to " + p.getName());
+                p.getInventory().addItem(QuarryControllerBlock.create());
+                p.sendMessage("§aGiven Quarry Controller.");
+            }
             default -> {
                 debug.log("onCommand", "Unknown item type: " + type);
                 p.sendMessage("§cUnknown item type: " + args[1]);
-                p.sendMessage("§eValid types: marker, wrench, tube");
+                p.sendMessage("§eValid types: marker, wrench, tube, controller");
             }
         }
 

@@ -33,6 +33,10 @@ public class ControllerListener implements Listener {
                         q.getOwner() + " at " + loc);
 
                 e.getPlayer().openInventory(QuarryGUI.build(q));
+                
+                // Track that this player has opened the GUI
+                ControllerGuiListener.trackGuiOpen(e.getPlayer(), q);
+                
                 e.setCancelled(true);
 
                 debug.log("onInteract", "Opened Quarry GUI for player " +

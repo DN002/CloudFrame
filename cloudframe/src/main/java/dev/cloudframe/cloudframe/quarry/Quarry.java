@@ -36,17 +36,18 @@ public class Quarry {
     private int scanX;
     private int scanY;
     private int scanZ;
+
     private boolean[] layerHasBlocks;
-    
+    private boolean[] layerScanned;
+
     private int totalBlocksInRegion;
     private int blocksMined;
-    
+
     // Async metadata
     private boolean metadataReady = false;
-    private int[] blocksPerLayer;     // indexed by layerIndex
-    private boolean[] emptyLayers;    // indexed by layerIndex
+    private int[] blocksPerLayer;
+    private boolean[] emptyLayers;
     private boolean scanningMetadata = false;
-
 
     private final List<ItemStack> outputBuffer = new ArrayList<>();
 
@@ -57,22 +58,20 @@ public class Quarry {
         this.region = region;
         this.controller = controller;
 
-        this.currentY = region.minY();
+        // Start at the TOP of the region
         this.currentX = region.minX();
         this.currentZ = region.minZ();
+        this.currentY = region.maxY();
 
-        // Initialize incremental scan state
-        this.scanY = region.minY();
         this.scanX = region.minX();
         this.scanZ = region.minZ();
+        this.scanY = region.maxY();
 
-        // Prepare layer metadata array (for future layer skipping)
-        int startY = region.minY();
-        int endY = region.getWorld().getMinHeight();
-        int layerCount = (startY - endY) + 1;
+        int layerCount = region.height();
         this.layerHasBlocks = new boolean[layerCount];
-        
-        this.totalBlocksInRegion = 0; // will be computed on first activation
+        this.layerScanned = new boolean[layerCount];
+
+        this.totalBlocksInRegion = 0;
         this.blocksMined = 0;
 
         debug.log("constructor", "Created quarry for owner=" + owner +
@@ -89,36 +88,36 @@ public class Quarry {
         this.active = active;
 
         if (active) {
-            // Reset incremental scan state
-            this.scanY = region.minY();
+            // Reset scan state
             this.scanX = region.minX();
             this.scanZ = region.minZ();
+            this.scanY = region.maxY();
 
-            // Reset layer metadata
+            this.currentX = region.minX();
+            this.currentZ = region.minZ();
+            this.currentY = region.maxY();
+
+            this.blocksMined = 0;
+            this.totalBlocksInRegion = 0;
+
             for (int i = 0; i < layerHasBlocks.length; i++) {
                 layerHasBlocks[i] = false;
+                layerScanned[i] = false;
             }
 
             startMetadataScan();
-            // Fallback until metadata is ready
-            computeTotalBlocks();
+            computeTotalBlocks(); // fallback
 
-            // Begin mining immediately
             findNextBlockToMine(true);
-
         }
     }
 
-    public int getCurrentY() {
-        return currentY;
+    public int getBlocksMined() {
+        return blocksMined;
     }
 
-    public Location getController() {
-        return controller;
-    }
-
-    public UUID getOwner() {
-        return owner;
+    public int getTotalBlocksInRegion() {
+        return totalBlocksInRegion;
     }
 
     public Location getPosA() {
@@ -131,6 +130,18 @@ public class Quarry {
 
     public World getWorld() {
         return posA.getWorld();
+    }
+
+    public int getCurrentY() {
+        return currentY;
+    }
+
+    public Location getController() {
+        return controller;
+    }
+
+    public UUID getOwner() {
+        return owner;
     }
 
     public Region getRegion() {
@@ -152,7 +163,7 @@ public class Quarry {
     public boolean[] getEmptyLayers() {
         return emptyLayers != null ? emptyLayers : new boolean[0];
     }
-    
+
     public boolean isChunkLoaded() {
         boolean loaded = posA.getWorld().isChunkLoaded(
                 posA.getBlockX() >> 4,
@@ -174,9 +185,8 @@ public class Quarry {
 
         World world = region.getWorld();
 
-        // If current position is invalid or empty, find the next block
         Material typeAtPos = world.getBlockAt(currentX, currentY, currentZ).getType();
-        if (typeAtPos == Material.AIR || typeAtPos == Material.BEDROCK) {
+        if (!isMineable(typeAtPos)) {
             if (!findNextBlockToMine(shouldLog)) {
                 if (shouldLog) debug.log("tick", "Region empty — idle");
                 return;
@@ -190,42 +200,36 @@ public class Quarry {
         Block block = world.getBlockAt(currentX, currentY, currentZ);
         Material type = block.getType();
 
-        if (type != Material.AIR && type != Material.BEDROCK) {
-
+        if (isMineable(type)) {
             if (shouldLog) {
                 debug.log("tick", "Mining block " + type +
                         " at (" + currentX + "," + currentY + "," + currentZ + ")");
             }
 
-            // Only add solid blocks to output buffer
-            if (type.isSolid()) {
-                outputBuffer.add(new ItemStack(type));
-            }
-
-            // Replace everything (including fluids) with air
+            outputBuffer.add(new ItemStack(type));
             block.setType(Material.AIR);
             blocksMined++;
         }
 
-        // Try sending items
         if (!outputBuffer.isEmpty()) {
-            if (shouldLog) {
-                debug.log("tick", "Output buffer size=" + outputBuffer.size());
-            }
+            if (shouldLog) debug.log("tick", "Output buffer size=" + outputBuffer.size());
             trySendToTube(shouldLog);
         }
 
-        // Move to next block
         advancePosition(shouldLog);
     }
 
+    private boolean isMineable(Material type) {
+        if (type == Material.AIR) return false;
+        if (type == Material.BEDROCK) return false;
+        if (type.isSolid()) return true;
+        if (type == Material.WATER || type == Material.LAVA) return true;
+        return false;
+    }
+
     private void advancePosition(boolean shouldLog) {
-        // After mining a block, simply find the next one.
         if (!findNextBlockToMine(shouldLog)) {
-            // No blocks left — quarry idles but stays active until user disables it
-            if (shouldLog) {
-                debug.log("advancePosition", "No more blocks to mine — idle");
-            }
+            if (shouldLog) debug.log("advancePosition", "No more blocks to mine — idle");
         }
     }
 
@@ -245,21 +249,12 @@ public class Quarry {
             }
         }
 
-        if (nearestTube == null) {
-            if (shouldLog) debug.log("trySendToTube", "No tubes found near controller");
-            return;
-        }
-
-        if (shouldLog) debug.log("trySendToTube", "Nearest tube at " + nearestTube.getLocation());
+        if (nearestTube == null) return;
 
         List<Location> inventories = CloudFrameRegistry.tubes().findInventoriesNear(nearestTube);
-        if (inventories.isEmpty()) {
-        	if (shouldLog) debug.log("trySendToTube", "No inventories found near tube");
-            return;
-        }
+        if (inventories.isEmpty()) return;
 
         Location bestInv = inventories.get(0);
-        if (shouldLog) debug.log("trySendToTube", "Found inventory at " + bestInv);
 
         TubeNode destTube = null;
         for (TubeNode node : CloudFrameRegistry.tubes().all()) {
@@ -269,62 +264,57 @@ public class Quarry {
             }
         }
 
-        if (destTube == null) {
-        	if (shouldLog) debug.log("trySendToTube", "No tube found near inventory");
-            return;
-        }
-
-        if (shouldLog) debug.log("trySendToTube", "Destination tube at " + destTube.getLocation());
+        if (destTube == null) return;
 
         List<TubeNode> path = CloudFrameRegistry.tubes().findPath(nearestTube, destTube);
-        if (path == null) {
-        	if (shouldLog) debug.log("trySendToTube", "No valid path found between tubes");
-            return;
-        }
+        if (path == null) return;
 
         ItemStack item = outputBuffer.remove(0);
-        if (shouldLog) debug.log("trySendToTube", "Routing item " + item.getType() +
-                " along path length=" + path.size());
-
         CloudFrameRegistry.packets().add(new ItemPacket(item, path));
     }
-    
+
     public double getProgressPercent() {
-        if (totalBlocksInRegion == 0) return 100.0;
+        if (totalBlocksInRegion == 0) return 0.0;
         return (blocksMined / (double) totalBlocksInRegion) * 100.0;
     }
 
     private boolean findNextBlockToMine(boolean shouldLog) {
+
         World world = region.getWorld();
 
         int minX = region.minX();
         int maxX = region.maxX();
         int minZ = region.minZ();
         int maxZ = region.maxZ();
-        int minY = world.getMinHeight();
 
-        while (scanY >= minY) {
+        while (scanY >= region.minY()) {
 
-            int layerIndex = region.minY() - scanY;
+            int layerIndex = region.maxY() - scanY;
 
-            // If this layer was previously scanned and found empty → skip instantly
-            if (!layerHasBlocks[layerIndex] && scanX == minX && scanZ == minZ) {
-                if (shouldLog) {
-                    debug.log("findNextBlockToMine", "Skipping empty layer Y=" + scanY);
-                }
+            if (layerIndex < 0 || layerIndex >= layerHasBlocks.length) {
+                scanY--;
+                scanX = minX;
+                scanZ = minZ;
+                continue;
+            }
+
+            if (layerScanned[layerIndex] && !layerHasBlocks[layerIndex] &&
+                scanX == minX && scanZ == minZ) {
+
+                if (shouldLog) debug.log("findNextBlockToMine", "Skipping empty layer Y=" + scanY);
                 scanY--;
                 continue;
             }
 
             boolean foundBlockInLayer = false;
 
-            // Scan this Y layer from scanX/scanZ forward
             for (int x = scanX; x <= maxX; x++) {
                 for (int z = (x == scanX ? scanZ : minZ); z <= maxZ; z++) {
 
                     Material type = world.getBlockAt(x, scanY, z).getType();
+                    if (shouldLog) debug.log("scan", "Checking (" + x + "," + scanY + "," + z + ") = " + type);
 
-                    if (type != Material.AIR && type.isSolid() && type != Material.BEDROCK) {
+                    if (isMineable(type)) {
                         foundBlockInLayer = true;
                         layerHasBlocks[layerIndex] = true;
 
@@ -332,7 +322,6 @@ public class Quarry {
                         currentY = scanY;
                         currentZ = z;
 
-                        // Update scan position for next time
                         scanZ = z + 1;
                         scanX = x;
 
@@ -355,72 +344,60 @@ public class Quarry {
                 }
             }
 
-            // Finished scanning this layer
             if (!foundBlockInLayer) {
-                layerHasBlocks[layerIndex] = false; // mark empty
-                if (shouldLog) {
-                    debug.log("findNextBlockToMine", "Layer Y=" + scanY + " is empty");
-                }
+                layerHasBlocks[layerIndex] = false;
+                if (shouldLog) debug.log("findNextBlockToMine", "Layer Y=" + scanY + " is empty");
             }
 
-            // Move down to next layer
+            layerScanned[layerIndex] = true;
+
             scanX = minX;
             scanZ = minZ;
             scanY--;
         }
 
-        if (shouldLog) {
-            debug.log("findNextBlockToMine", "No blocks left in region");
-        }
+        if (shouldLog) debug.log("findNextBlockToMine", "No blocks left in region");
         return false;
     }
-    
+
     private void computeTotalBlocks() {
         if (totalBlocksInRegion > 0) return;
 
         World world = region.getWorld();
         int count = 0;
 
-        for (int y = region.minY(); y >= world.getMinHeight(); y--) {
+        for (int y = region.maxY(); y >= region.minY(); y--) {
             for (int x = region.minX(); x <= region.maxX(); x++) {
                 for (int z = region.minZ(); z <= region.maxZ(); z++) {
                     Material type = world.getBlockAt(x, y, z).getType();
-                    if (type.isSolid() && type != Material.BEDROCK) {
-                        count++;
-                    }
+                    if (isMineable(type)) count++;
                 }
             }
         }
 
         this.totalBlocksInRegion = count;
     }
-    
+
     public void startMetadataScan() {
         if (scanningMetadata || metadataReady) return;
-
         scanningMetadata = true;
         metadataReady = false;
 
-        int layerCount = layerHasBlocks.length;
+        int layerCount = region.height();
         blocksPerLayer = new int[layerCount];
         emptyLayers = new boolean[layerCount];
 
-        // Step 1: Build snapshot on main thread in small slices
-        buildSnapshotAsync(region.minY(), new ArrayList<>());
+        buildSnapshotAsync(region.maxY(), new ArrayList<>());
     }
 
     private void buildSnapshotAsync(int y, List<Material> snapshot) {
         World world = region.getWorld();
 
-        int endY = world.getMinHeight();
-
-        if (y < endY) {
-            // Snapshot complete — process async
+        if (y < region.minY()) {
             processSnapshotAsync(snapshot);
             return;
         }
 
-        // Scan one layer per tick
         for (int x = region.minX(); x <= region.maxX(); x++) {
             for (int z = region.minZ(); z <= region.maxZ(); z++) {
                 snapshot.add(world.getBlockAt(x, y, z).getType());
@@ -429,34 +406,46 @@ public class Quarry {
 
         int nextY = y - 1;
 
-        // Schedule next slice next tick
         org.bukkit.Bukkit.getScheduler().runTaskLater(
-            CloudFrameRegistry.plugin(),
-            () -> buildSnapshotAsync(nextY, snapshot),
-            1L
+                CloudFrameRegistry.plugin(),
+                () -> buildSnapshotAsync(nextY, snapshot),
+                1L
         );
     }
-    
+
     private void processSnapshotAsync(List<Material> snapshot) {
         org.bukkit.Bukkit.getScheduler().runTaskAsynchronously(
-            CloudFrameRegistry.plugin(),
-            () -> {
-                computeMetadata(snapshot);
-
-                // Return results to main thread
-                org.bukkit.Bukkit.getScheduler().runTask(
-                    CloudFrameRegistry.plugin(),
-                    () -> {
-                        metadataReady = true;
-                        scanningMetadata = false;
-                        debug.log("metadata", "Metadata scan complete");
+                CloudFrameRegistry.plugin(),
+                () -> {
+                    try {
+                        computeMetadata(snapshot);
+                    } catch (Exception ex) {
+                        ex.printStackTrace();
+                        debug.log("metadata", "Metadata scan failed: " + ex.getMessage());
                     }
-                );
-            }
+
+                    org.bukkit.Bukkit.getScheduler().runTask(
+                            CloudFrameRegistry.plugin(),
+                            () -> {
+                                metadataReady = true;
+                                scanningMetadata = false;
+                                debug.log("metadata", "Metadata scan complete");
+                            }
+                    );
+                }
         );
     }
 
     private void computeMetadata(List<Material> snapshot) {
+        if (snapshot.isEmpty()) {
+            for (int i = 0; i < blocksPerLayer.length; i++) {
+                blocksPerLayer[i] = 0;
+                emptyLayers[i] = true;
+            }
+            totalBlocksInRegion = 0;
+            return;
+        }
+
         int width = region.width();
         int length = region.length();
 
@@ -471,9 +460,7 @@ public class Quarry {
 
             for (int i = 0; i < layerSize; i++) {
                 Material type = snapshot.get(index++);
-                if (type.isSolid() && type != Material.BEDROCK) {
-                    count++;
-                }
+                if (isMineable(type)) count++;
             }
 
             blocksPerLayer[layer] = count;

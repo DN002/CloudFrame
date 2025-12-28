@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import org.bukkit.Location;
 import org.bukkit.Bukkit;
+import org.bukkit.Material;
 
 import dev.cloudframe.cloudframe.util.Region;
 import dev.cloudframe.cloudframe.storage.Database;
@@ -57,12 +58,14 @@ public class QuarryManager {
             """);
 
             for (Quarry q : quarries) {
+
                 debug.log("saveAll", "Saving quarry owner=" + q.getOwner() +
                         " controller=" + q.getController());
 
                 ps.setString(1, q.getOwner().toString());
                 ps.setString(2, q.getWorld().getName());
 
+                // Save original marker positions
                 ps.setInt(3, q.getPosA().getBlockX());
                 ps.setInt(4, q.getPosA().getBlockY());
                 ps.setInt(5, q.getPosA().getBlockZ());
@@ -71,6 +74,7 @@ public class QuarryManager {
                 ps.setInt(7, q.getPosB().getBlockY());
                 ps.setInt(8, q.getPosB().getBlockZ());
 
+                // Save controller
                 ps.setInt(9, q.getController().getBlockX());
                 ps.setInt(10, q.getController().getBlockY());
                 ps.setInt(11, q.getController().getBlockZ());
@@ -89,6 +93,8 @@ public class QuarryManager {
     public void loadAll() {
         debug.log("loadAll", "Loading quarries from database");
 
+        quarries.clear(); // prevent duplicates on reload
+
         Database.run(conn -> {
             var rs = conn.createStatement().executeQuery("SELECT * FROM quarries");
 
@@ -102,28 +108,40 @@ public class QuarryManager {
                     continue;
                 }
 
+                // Load original marker positions
                 Location a = new Location(w, rs.getInt("ax"), rs.getInt("ay"), rs.getInt("az"));
                 Location b = new Location(w, rs.getInt("bx"), rs.getInt("by"), rs.getInt("bz"));
 
+                // Load controller
                 Location controller = new Location(
-                    w,
-                    rs.getInt("controllerX"),
-                    rs.getInt("controllerY"),
-                    rs.getInt("controllerZ")
+                        w,
+                        rs.getInt("controllerX"),
+                        rs.getInt("controllerY"),
+                        rs.getInt("controllerZ")
                 );
 
+                // Rebuild region (normalized + cached)
                 Region region = new Region(a, b);
+
+                // Flatten region to controller Y (matches WrenchListener behavior)
+                int y = controller.getBlockY();
+                region = new Region(
+                        new Location(w, region.minX(), y, region.minZ()),
+                        new Location(w, region.maxX(), y, region.maxZ())
+                );
+
                 Quarry q = new Quarry(owner, a, b, region, controller);
 
-                q.setActive(rs.getInt("active") == 1);
+                boolean active = rs.getInt("active") == 1;
+                q.setActive(active);
 
                 debug.log("loadAll", "Loaded quarry owner=" + owner +
                         " controller=" + controller +
-                        " active=" + q.isActive());
+                        " active=" + active);
 
                 // Restore controller block if missing
-                if (controller.getBlock().getType() != org.bukkit.Material.COPPER_BLOCK) {
-                    controller.getBlock().setType(org.bukkit.Material.COPPER_BLOCK);
+                if (controller.getBlock().getType() != Material.COPPER_BLOCK) {
+                    controller.getBlock().setType(Material.COPPER_BLOCK);
                     debug.log("loadAll", "Restored missing controller block at " + controller);
                 }
 
@@ -142,7 +160,11 @@ public class QuarryManager {
 
     public Quarry getByController(Location loc) {
         for (Quarry q : quarries) {
-            if (q.getController().equals(loc)) {
+            if (q.getController().getWorld().equals(loc.getWorld()) &&
+                q.getController().getBlockX() == loc.getBlockX() &&
+                q.getController().getBlockY() == loc.getBlockY() &&
+                q.getController().getBlockZ() == loc.getBlockZ()) {
+
                 debug.log("getByController", "Found quarry for controller=" + loc);
                 return q;
             }

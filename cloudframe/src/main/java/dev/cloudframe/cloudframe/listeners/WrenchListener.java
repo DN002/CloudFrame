@@ -31,7 +31,8 @@ public class WrenchListener implements Listener {
             return;
         }
 
-        debug.log("onInteract", "Player " + p.getName() + " used Cloud Wrench at " + e.getClickedBlock().getLocation());
+        Location clicked = e.getClickedBlock().getLocation();
+        debug.log("onInteract", "Player " + p.getName() + " used Cloud Wrench at " + clicked);
 
         // Must have both marker positions
         if (!CloudFrameRegistry.markers().hasBoth(p.getUniqueId())) {
@@ -40,11 +41,23 @@ public class WrenchListener implements Listener {
             return;
         }
 
+        // Normalize region
         Location a = CloudFrameRegistry.markers().getPosA(p.getUniqueId());
         Location b = CloudFrameRegistry.markers().getPosB(p.getUniqueId());
         Region region = new Region(a, b);
 
-        debug.log("onInteract", "Region created for " + p.getName() + ": " + region);
+        debug.log("onInteract", "Raw region: " + region);
+
+        // Expand region vertically: top = clicked Y, bottom = world min height
+        int topY = clicked.getBlockY();
+        int bottomY = region.getWorld().getMinHeight();
+
+        region = new Region(
+                new Location(region.getWorld(), region.minX(), bottomY, region.minZ()),
+                new Location(region.getWorld(), region.maxX(), topY, region.maxZ())
+        );
+
+        debug.log("onInteract", "Expanded vertical region: " + region);
 
         // Validate size
         if (region.width() != QUARRY_SIZE || region.length() != QUARRY_SIZE) {
@@ -63,9 +76,7 @@ public class WrenchListener implements Listener {
             }
         }
 
-     // Controller must be placed on the border of the region
-        Location clicked = e.getClickedBlock().getLocation();
-
+        // Controller must be placed on the border of the region
         boolean onBorder =
                 clicked.getBlockX() == region.minX() ||
                 clicked.getBlockX() == region.maxX() ||
@@ -78,12 +89,10 @@ public class WrenchListener implements Listener {
             return;
         }
 
-        // Compute controller location 1 block OUTSIDE the frame
         int cx = clicked.getBlockX();
-        int cy = clicked.getBlockY();
+        int cy = region.maxY(); // controller always at top layer
         int cz = clicked.getBlockZ();
 
-        // Push outward depending on which border was clicked
         if (cx == region.minX()) cx -= 1;
         else if (cx == region.maxX()) cx += 1;
 
@@ -99,11 +108,7 @@ public class WrenchListener implements Listener {
             return;
         }
 
-        // Place controller block OUTSIDE the frame
-        controller.getBlock().setType(Material.COPPER_BLOCK);
-        debug.log("onInteract", "Placed controller block at " + controller);
-
-        // Build border
+        // Build border BEFORE placing controller
         debug.log("onInteract", "Building quarry border for region " + region);
         buildBorder(region);
 
@@ -146,6 +151,7 @@ public class WrenchListener implements Listener {
 
     private void buildBorder(Region r) {
         var world = r.getWorld();
+        int y = r.maxY(); // build the frame at the surface layer
 
         for (int x = r.minX(); x <= r.maxX(); x++) {
             for (int z = r.minZ(); z <= r.maxZ(); z++) {
@@ -155,11 +161,10 @@ public class WrenchListener implements Listener {
                         z == r.minZ() || z == r.maxZ();
 
                 if (border) {
-                    world.getBlockAt(x, r.minY(), z).setType(Material.GLASS);
+                    world.getBlockAt(x, y, z).setType(Material.GLASS);
                 }
             }
         }
-
-        debug.log("buildBorder", "Border built for region " + r);
+        debug.log("buildBorder", "Border built at Y=" + y + " for region " + r);
     }
 }

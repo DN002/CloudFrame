@@ -16,6 +16,8 @@ import dev.cloudframe.cloudframe.util.DebugManager;
 public class MarkerListener implements Listener {
 
     private static final Debug debug = DebugManager.get(MarkerListener.class);
+    private final java.util.Map<java.util.UUID, Long> lastClick = new java.util.HashMap<>();
+    private static final long DEBOUNCE_MS = 250;
 
     @EventHandler
     public void onInteract(PlayerInteractEvent e) {
@@ -27,6 +29,15 @@ public class MarkerListener implements Listener {
         }
 
         Action action = e.getAction();
+        long now = System.currentTimeMillis();
+        Long last = lastClick.get(p.getUniqueId());
+        if (last != null && now - last < DEBOUNCE_MS) {
+            debug.log("onInteract", "Debounced duplicate marker click for " + p.getName());
+            e.setCancelled(true);
+            return;
+        }
+        lastClick.put(p.getUniqueId(), now);
+
         debug.log("onInteract", "Player " + p.getName() + " used Marker Tool, action=" + action);
 
         // Only respond to block clicks

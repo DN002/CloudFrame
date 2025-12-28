@@ -123,11 +123,13 @@ public class QuarryManager {
                 // Rebuild region (normalized + cached)
                 Region region = new Region(a, b);
 
-                // Flatten region to controller Y (matches WrenchListener behavior)
-                int y = controller.getBlockY();
+                // Rebuild full vertical region exactly like WrenchListener
+                int topY = Math.max(a.getBlockY(), b.getBlockY());
+                int bottomY = w.getMinHeight();
+
                 region = new Region(
-                        new Location(w, region.minX(), y, region.minZ()),
-                        new Location(w, region.maxX(), y, region.maxZ())
+                    new Location(w, region.minX(), bottomY, region.minZ()),
+                    new Location(w, region.maxX(), topY, region.maxZ())
                 );
 
                 Quarry q = new Quarry(owner, a, b, region, controller);

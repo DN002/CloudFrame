@@ -1,6 +1,6 @@
 
 =========================
--      CloudFrame       -
+**     CLOUDFRAME     **
 =========================
 
 A Minecraft machinery server plugin for 1.21.XX...

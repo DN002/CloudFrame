@@ -35,11 +35,11 @@ mvn -f cloudframe/pom.xml clean package
 - The project depends on Paper API and `org.xerial:sqlite-jdbc` (see `cloudframe/pom.xml`).
 
 Files to inspect for common edits
-- Plugin entry & lifecycle: [cloudframe/src/main/java/dev/cloudframe/cloudframe/CloudFrame.java](cloudframe/src/main/java/dev/cloudframe/cloudframe/CloudFrame.java)
-- Engine & registry: [cloudframe/src/main/java/dev/cloudframe/cloudframe/core/CloudFrameEngine.java](cloudframe/src/main/java/dev/cloudframe/cloudframe/core/CloudFrameEngine.java), [cloudframe/src/main/java/dev/cloudframe/cloudframe/core/CloudFrameRegistry.java](cloudframe/src/main/java/dev/cloudframe/cloudframe/core/CloudFrameRegistry.java)
-- Persistence: [cloudframe/src/main/java/dev/cloudframe/cloudframe/storage/Database.java](cloudframe/src/main/java/dev/cloudframe/cloudframe/storage/Database.java) and `cloudframe/pom.xml` for JDBC dependency
-- Tubes: [cloudframe/src/main/java/dev/cloudframe/cloudframe/tubes/TubeNetworkManager.java](cloudframe/src/main/java/dev/cloudframe/cloudframe/tubes/TubeNetworkManager.java)
-- Quarries: [cloudframe/src/main/java/dev/cloudframe/cloudframe/quarry/QuarryManager.java](cloudframe/src/main/java/dev/cloudframe/cloudframe/quarry/QuarryManager.java)
+- Plugin entry & lifecycle: [cloudframe/src/main/java/dev/cloudframe/cloudframe/CloudFrame.java](../cloudframe/src/main/java/dev/cloudframe/cloudframe/CloudFrame.java)
+- Engine & registry: [cloudframe/src/main/java/dev/cloudframe/cloudframe/core/CloudFrameEngine.java](../cloudframe/src/main/java/dev/cloudframe/cloudframe/core/CloudFrameEngine.java), [cloudframe/src/main/java/dev/cloudframe/cloudframe/core/CloudFrameRegistry.java](../cloudframe/src/main/java/dev/cloudframe/cloudframe/core/CloudFrameRegistry.java)
+- Persistence: [cloudframe/src/main/java/dev/cloudframe/cloudframe/storage/Database.java](../cloudframe/src/main/java/dev/cloudframe/cloudframe/storage/Database.java) and `cloudframe/pom.xml` for JDBC dependency
+- Tubes: [cloudframe/src/main/java/dev/cloudframe/cloudframe/tubes/TubeNetworkManager.java](../cloudframe/src/main/java/dev/cloudframe/cloudframe/tubes/TubeNetworkManager.java)
+- Quarries: [cloudframe/src/main/java/dev/cloudframe/cloudframe/quarry/QuarryManager.java](../cloudframe/src/main/java/dev/cloudframe/cloudframe/quarry/QuarryManager.java)
 - Event listeners & commands live under `listeners/` and `commands/` — register order matters at startup.
 
 What an AI agent should do first (recommended checklist)

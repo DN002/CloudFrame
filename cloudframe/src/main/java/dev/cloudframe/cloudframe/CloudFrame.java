@@ -15,6 +15,7 @@ import dev.cloudframe.cloudframe.listeners.WrenchListener;
 import dev.cloudframe.cloudframe.storage.Database;
 import dev.cloudframe.cloudframe.util.DebugFile;
 import dev.cloudframe.cloudframe.util.DebugManager;
+import dev.cloudframe.cloudframe.util.RecipeManager;
 
 public class CloudFrame extends JavaPlugin {
 
@@ -59,6 +60,9 @@ public class CloudFrame extends JavaPlugin {
 
         // Start GUI update task
         ControllerGuiListener.startGuiUpdateTask();
+
+        // Register crafting recipes for plugin items
+        RecipeManager.register(this);
 
         // Register commands safely
         if (getCommand("cloudframe") != null) {

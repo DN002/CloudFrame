@@ -342,7 +342,7 @@ public final class TubeVisualManager {
     }
 
     private void ensureInteraction(Location tubeLoc) {
-        Location desired = tubeLoc.clone().add(0.5, 0.0, 0.5);
+        Location desired = tubeLoc.clone().add(0.5, 0.5, 0.5);
 
         java.util.UUID id = interactionByTube.get(tubeLoc);
         if (id != null) {
@@ -367,16 +367,18 @@ public final class TubeVisualManager {
         World world = tubeLoc.getWorld();
         if (world == null) throw new IllegalStateException("Tube location has no world");
 
-        // Interaction hitboxes are bottom-anchored; spawn at bottom-center so the 1x1x1
-        // hitbox covers the full blockspace.
-        Location base = tubeLoc.clone().add(0.5, 0.0, 0.5);
-        Interaction interaction = (Interaction) world.spawnEntity(base, EntityType.INTERACTION);
+        // Interaction hitboxes are centered on the entity location; spawn at block-center
+        // so the 1x1x1 hitbox covers the full blockspace.
+        Location center = tubeLoc.clone().add(0.5, 0.5, 0.5);
+        Interaction interaction = (Interaction) world.spawnEntity(center, EntityType.INTERACTION);
         interaction.setGravity(false);
         interaction.setInvulnerable(true);
         interaction.setPersistent(false);
-        // Full-block hitbox so clicks/hover feel like selecting a block.
-        interaction.setInteractionWidth(1.0f);
-        interaction.setInteractionHeight(1.0f);
+        // Make the entity very hard to crosshair-target so the spoofed client-side block
+        // can win and render the vanilla selection outline.
+        // Interactions are still usable via block-click handlers (selection-box clicks).
+        interaction.setInteractionWidth(0.01f);
+        interaction.setInteractionHeight(0.01f);
 
         tagTubeEntity(interaction.getPersistentDataContainer(), tubeLoc, "interaction");
 
@@ -410,6 +412,16 @@ public final class TubeVisualManager {
     }
 
     private static void configureTubeDisplay(ItemDisplay display) {
+        // Make the visual entity very hard to crosshair-target.
+        // Otherwise the client targets the ItemDisplay instead of the spoofed block,
+        // preventing the vanilla block selection outline from appearing.
+        try {
+            display.setDisplayWidth(0.01f);
+            display.setDisplayHeight(0.01f);
+        } catch (Throwable ignored) {
+            // Older API.
+        }
+
         // Ensure displays don't camera-billboard (keeps caps/arms facing the right way).
         try {
             display.setBillboard(Display.Billboard.FIXED);

@@ -137,7 +137,7 @@ public final class ControllerVisualManager {
     }
 
     private void ensureInteraction(Location controllerLoc) {
-        Location desired = controllerLoc.clone().add(0.5, 0.0, 0.5);
+        Location desired = controllerLoc.clone().add(0.5, 0.5, 0.5);
 
         UUID id = interactionByLoc.get(controllerLoc);
         if (id != null) {
@@ -172,15 +172,15 @@ public final class ControllerVisualManager {
         World world = controllerLoc.getWorld();
         if (world == null) throw new IllegalStateException("Controller location has no world");
 
-        // Interaction hitboxes are bottom-anchored; spawn at bottom-center so the 1x1x1
-        // hitbox covers the full blockspace.
-        Location base = controllerLoc.clone().add(0.5, 0.0, 0.5);
-        Interaction interaction = (Interaction) world.spawnEntity(base, EntityType.INTERACTION);
+        // Interaction hitboxes are centered on the entity location; spawn at block-center
+        // so the 1x1x1 hitbox covers the full blockspace.
+        Location center = controllerLoc.clone().add(0.5, 0.5, 0.5);
+        Interaction interaction = (Interaction) world.spawnEntity(center, EntityType.INTERACTION);
         interaction.setGravity(false);
         interaction.setInvulnerable(true);
         interaction.setPersistent(false);
-        interaction.setInteractionWidth(1.0f);
-        interaction.setInteractionHeight(1.0f);
+        interaction.setInteractionWidth(0.01f);
+        interaction.setInteractionHeight(0.01f);
 
         tag(interaction.getPersistentDataContainer(), controllerLoc, "interaction");
 
@@ -197,6 +197,15 @@ public final class ControllerVisualManager {
         display.setGravity(false);
         display.setInvulnerable(true);
         display.setPersistent(false);
+
+        // Make the visual entity very hard to crosshair-target so the client can still
+        // target the spoofed block and render the vanilla selection outline.
+        try {
+            display.setDisplayWidth(0.01f);
+            display.setDisplayHeight(0.01f);
+        } catch (Throwable ignored) {
+            // Older API.
+        }
 
         display.setItemStack(controllerDisplayStack());
         display.setRotation(applyModelYawOffset(controllerYaw), 0.0f);

@@ -427,86 +427,84 @@ public class TubeListener implements Listener {
             limit = Math.max(0.0, limit - 0.01);
         }
 
-        // Primary: raytrace the Interaction entity.
+        // Primary: voxel ray-walk (matches vanilla block targeting).
+        Location dd = findFirstTubeBlockspaceAlongRay(eye, dir, limit);
+        if (dd != null) return dd;
+
+        // Fallback: raytrace the Interaction entity (keep radius small to avoid adjacent tube hits).
         RayTraceResult rr = player.getWorld().rayTraceEntities(
             eye,
             dir,
             limit,
-            0.45,
+            0.12,
             ent -> (ent instanceof Interaction) && CloudFrameRegistry.tubes().visualsManager().getTaggedTubeLocation(ent.getPersistentDataContainer()) != null
         );
 
-        if (rr != null && rr.getHitEntity() != null) {
-            return CloudFrameRegistry.tubes().visualsManager().getTaggedTubeLocation(
-                rr.getHitEntity().getPersistentDataContainer()
-            );
-        }
+        if (rr == null || rr.getHitEntity() == null) return null;
 
-        // Fallback: scan blockspaces along the ray to find a tube location.
-        final double step = 0.10;
-        final double maxDistSqToAabb = 0.35 * 0.35;
-
-        for (double d = 0.0; d <= limit; d += step) {
-            Location sampleLoc = eye.clone().add(dir.clone().multiply(d));
-            int bx = sampleLoc.getBlockX();
-            int by = sampleLoc.getBlockY();
-            int bz = sampleLoc.getBlockZ();
-
-            Location best = findNearestTubeAtOrNear(sampleLoc, bx, by, bz, maxDistSqToAabb);
-            if (best != null) return best;
-        }
-
-        return null;
+        return CloudFrameRegistry.tubes().visualsManager().getTaggedTubeLocation(
+            rr.getHitEntity().getPersistentDataContainer()
+        );
     }
 
-    private static Location findNearestTubeAtOrNear(Location sampleLoc, int bx, int by, int bz, double maxDistSqToAabb) {
-        if (sampleLoc == null || sampleLoc.getWorld() == null) return null;
+    private static Location findFirstTubeBlockspaceAlongRay(Location eye, Vector dir, double limit) {
+        if (eye == null || eye.getWorld() == null || dir == null) return null;
+        if (limit <= 0.0) return null;
 
-        int[][] offsets = new int[][] {
-            {0, 0, 0},
-            {1, 0, 0}, {-1, 0, 0},
-            {0, 1, 0}, {0, -1, 0},
-            {0, 0, 1}, {0, 0, -1}
-        };
+        Vector d = dir.clone();
+        double len = d.length();
+        if (len == 0.0) return null;
+        d.multiply(1.0 / len);
 
-        Location bestLoc = null;
-        double bestDistSq = Double.POSITIVE_INFINITY;
+        double ox = eye.getX() + d.getX() * 0.01;
+        double oy = eye.getY() + d.getY() * 0.01;
+        double oz = eye.getZ() + d.getZ() * 0.01;
 
-        double px = sampleLoc.getX();
-        double py = sampleLoc.getY();
-        double pz = sampleLoc.getZ();
+        int x = (int) Math.floor(ox);
+        int y = (int) Math.floor(oy);
+        int z = (int) Math.floor(oz);
 
-        for (int[] o : offsets) {
-            int x = bx + o[0];
-            int y = by + o[1];
-            int z = bz + o[2];
-            Location cand = new Location(sampleLoc.getWorld(), x, y, z);
-            if (CloudFrameRegistry.tubes().getTube(cand) == null) continue;
+        int stepX = d.getX() > 0 ? 1 : (d.getX() < 0 ? -1 : 0);
+        int stepY = d.getY() > 0 ? 1 : (d.getY() < 0 ? -1 : 0);
+        int stepZ = d.getZ() > 0 ? 1 : (d.getZ() < 0 ? -1 : 0);
 
-            double distSq = distSqPointToUnitAabb(px, py, pz, x, y, z);
-            if (distSq <= maxDistSqToAabb && distSq < bestDistSq) {
-                bestDistSq = distSq;
-                bestLoc = cand;
+        double tDeltaX = stepX == 0 ? Double.POSITIVE_INFINITY : Math.abs(1.0 / d.getX());
+        double tDeltaY = stepY == 0 ? Double.POSITIVE_INFINITY : Math.abs(1.0 / d.getY());
+        double tDeltaZ = stepZ == 0 ? Double.POSITIVE_INFINITY : Math.abs(1.0 / d.getZ());
+
+        double nextVoxelBoundaryX = stepX > 0 ? (x + 1.0) : x;
+        double nextVoxelBoundaryY = stepY > 0 ? (y + 1.0) : y;
+        double nextVoxelBoundaryZ = stepZ > 0 ? (z + 1.0) : z;
+
+        double tMaxX = stepX == 0 ? Double.POSITIVE_INFINITY : (nextVoxelBoundaryX - ox) / d.getX();
+        double tMaxY = stepY == 0 ? Double.POSITIVE_INFINITY : (nextVoxelBoundaryY - oy) / d.getY();
+        double tMaxZ = stepZ == 0 ? Double.POSITIVE_INFINITY : (nextVoxelBoundaryZ - oz) / d.getZ();
+
+        if (tMaxX < 0) tMaxX = 0;
+        if (tMaxY < 0) tMaxY = 0;
+        if (tMaxZ < 0) tMaxZ = 0;
+
+        double t = 0.0;
+        while (t <= limit) {
+            Location blockLoc = new Location(eye.getWorld(), x, y, z);
+            if (CloudFrameRegistry.tubes().getTube(blockLoc) != null) return blockLoc;
+
+            if (tMaxX <= tMaxY && tMaxX <= tMaxZ) {
+                x += stepX;
+                t = tMaxX;
+                tMaxX += tDeltaX;
+            } else if (tMaxY <= tMaxX && tMaxY <= tMaxZ) {
+                y += stepY;
+                t = tMaxY;
+                tMaxY += tDeltaY;
+            } else {
+                z += stepZ;
+                t = tMaxZ;
+                tMaxZ += tDeltaZ;
             }
         }
 
-        return bestLoc;
-    }
-
-    private static double distSqPointToUnitAabb(double px, double py, double pz, int ax, int ay, int az) {
-        double dx = 0.0;
-        if (px < ax) dx = ax - px;
-        else if (px > ax + 1.0) dx = px - (ax + 1.0);
-
-        double dy = 0.0;
-        if (py < ay) dy = ay - py;
-        else if (py > ay + 1.0) dy = py - (ay + 1.0);
-
-        double dz = 0.0;
-        if (pz < az) dz = az - pz;
-        else if (pz > az + 1.0) dz = pz - (az + 1.0);
-
-        return dx * dx + dy * dy + dz * dz;
+        return null;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -682,23 +680,11 @@ public class TubeListener implements Listener {
         double blockDist = player.getEyeLocation().distance(breakingBlockLoc.clone().add(0.5, 0.5, 0.5));
         double maxDist = Math.min(6.0, blockDist + 0.5);
 
-        RayTraceResult rr = player.getWorld().rayTraceEntities(
-            player.getEyeLocation(),
-            player.getEyeLocation().getDirection(),
-            maxDist,
-            0.2,
-            ent -> (ent instanceof Interaction) && CloudFrameRegistry.tubes().visualsManager().getTaggedTubeLocation(ent.getPersistentDataContainer()) != null
-        );
-
-        if (rr == null || rr.getHitEntity() == null) return null;
-
-        Location tubeLoc = CloudFrameRegistry.tubes().visualsManager().getTaggedTubeLocation(
-            rr.getHitEntity().getPersistentDataContainer()
-        );
+        Location tubeLoc = findFirstTubeBlockspaceAlongRay(player.getEyeLocation(), player.getEyeLocation().getDirection(), maxDist);
         if (tubeLoc == null) return null;
 
-        double entityDist = player.getEyeLocation().distance(rr.getHitEntity().getLocation());
-        if (entityDist > blockDist + 0.25) return null;
+        double tubeDist = player.getEyeLocation().distance(tubeLoc.clone().add(0.5, 0.5, 0.5));
+        if (tubeDist > blockDist + 0.25) return null;
 
         return tubeLoc;
     }

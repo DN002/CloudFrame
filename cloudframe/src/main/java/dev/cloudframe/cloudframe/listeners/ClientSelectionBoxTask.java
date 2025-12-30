@@ -32,7 +32,8 @@ public final class ClientSelectionBoxTask {
     private static BukkitTask task;
 
     private static final double MAX_DISTANCE = 6.0;
-    private static final double RAY_SIZE = 0.45;
+    // Keep this small; large radii can hit neighboring tube Interactions and select the wrong block.
+    private static final double RAY_SIZE = 0.12;
     private static final long PERIOD_TICKS = 1L;
 
     // Raytracing entities can briefly miss when aiming near edges; debounce clears to avoid flicker.
@@ -163,7 +164,13 @@ public final class ClientSelectionBoxTask {
             limit = Math.max(0.0, limit - 0.01);
         }
 
-        // Primary: raytrace tube/controller Interaction entities (cheap and accurate when it hits).
+        // Primary: voxel ray-walk (like vanilla block targeting). This reliably selects the
+        // actual blockspace under the crosshair and avoids accidentally selecting a neighboring
+        // tube/controller due to a fat entity ray.
+        Location hitVirtual = findFirstVirtualBlockspaceAlongRay(eye, dir, limit);
+        if (hitVirtual != null) return hitVirtual;
+
+        // Fallback: raytrace tube/controller Interaction entities.
         RayTraceResult rr = player.getWorld().rayTraceEntities(
             eye,
             dir,
@@ -172,103 +179,90 @@ public final class ClientSelectionBoxTask {
             ClientSelectionBoxTask::isHighlightableEntity
         );
 
-        if (rr != null && rr.getHitEntity() != null) {
-            Entity hit = rr.getHitEntity();
-            PersistentDataContainer pdc = hit.getPersistentDataContainer();
+        if (rr == null || rr.getHitEntity() == null) return null;
 
-            Location tubeLoc = null;
-            if (CloudFrameRegistry.tubes().visualsManager() != null) {
-                tubeLoc = CloudFrameRegistry.tubes().visualsManager().getTaggedTubeLocation(pdc);
-            }
-            if (tubeLoc != null) return tubeLoc;
+        Entity hit = rr.getHitEntity();
+        PersistentDataContainer pdc = hit.getPersistentDataContainer();
 
-            Location controllerLoc = null;
-            if (CloudFrameRegistry.quarries().visualsManager() != null) {
-                controllerLoc = CloudFrameRegistry.quarries().visualsManager().getTaggedControllerLocation(pdc);
-            }
-            if (controllerLoc != null) return controllerLoc;
+        Location tubeLoc = null;
+        if (CloudFrameRegistry.tubes().visualsManager() != null) {
+            tubeLoc = CloudFrameRegistry.tubes().visualsManager().getTaggedTubeLocation(pdc);
         }
+        if (tubeLoc != null) return tubeLoc;
 
-        // Fallback: scan blockspaces along the player's crosshair ray to find the nearest
-        // entity-only "block" location (tube/controller). This avoids outline flicker when
-        // the Interaction entity raytrace misses at certain angles.
-        return scanVirtualBlockspacesAlongRay(eye, dir, limit);
+        Location controllerLoc = null;
+        if (CloudFrameRegistry.quarries().visualsManager() != null) {
+            controllerLoc = CloudFrameRegistry.quarries().visualsManager().getTaggedControllerLocation(pdc);
+        }
+        return controllerLoc;
     }
 
-    private static Location scanVirtualBlockspacesAlongRay(Location eye, Vector dir, double limit) {
+    /**
+     * Walk the voxel grid along the ray (like vanilla block targeting) and return
+     * the first tube/controller blockspace encountered.
+     */
+    private static Location findFirstVirtualBlockspaceAlongRay(Location eye, Vector dir, double limit) {
         if (eye == null || eye.getWorld() == null || dir == null) return null;
+        if (limit <= 0.0) return null;
 
-        final double step = 0.10; // smaller step reduces misses on thin geometry / grazing angles
-        final double maxDistSqToAabb = 0.35 * 0.35; // how close the ray must be to the blockspace
+        Vector d = dir.clone();
+        double len = d.length();
+        if (len == 0.0) return null;
+        d.multiply(1.0 / len);
 
-        Location sample = eye.clone();
-        for (double d = 0.0; d <= limit; d += step) {
-            sample.set(
-                eye.getX() + dir.getX() * d,
-                eye.getY() + dir.getY() * d,
-                eye.getZ() + dir.getZ() * d
-            );
+        // Start slightly forward so we don't select inside the player's head.
+        double ox = eye.getX() + d.getX() * 0.01;
+        double oy = eye.getY() + d.getY() * 0.01;
+        double oz = eye.getZ() + d.getZ() * 0.01;
 
-            int bx = sample.getBlockX();
-            int by = sample.getBlockY();
-            int bz = sample.getBlockZ();
+        int x = (int) Math.floor(ox);
+        int y = (int) Math.floor(oy);
+        int z = (int) Math.floor(oz);
 
-            Location best = findNearestVirtualAtOrNear(eye, sample.toVector(), bx, by, bz, maxDistSqToAabb);
-            if (best != null) return best;
+        int stepX = d.getX() > 0 ? 1 : (d.getX() < 0 ? -1 : 0);
+        int stepY = d.getY() > 0 ? 1 : (d.getY() < 0 ? -1 : 0);
+        int stepZ = d.getZ() > 0 ? 1 : (d.getZ() < 0 ? -1 : 0);
+
+        double tDeltaX = stepX == 0 ? Double.POSITIVE_INFINITY : Math.abs(1.0 / d.getX());
+        double tDeltaY = stepY == 0 ? Double.POSITIVE_INFINITY : Math.abs(1.0 / d.getY());
+        double tDeltaZ = stepZ == 0 ? Double.POSITIVE_INFINITY : Math.abs(1.0 / d.getZ());
+
+        double nextVoxelBoundaryX = stepX > 0 ? (x + 1.0) : x;
+        double nextVoxelBoundaryY = stepY > 0 ? (y + 1.0) : y;
+        double nextVoxelBoundaryZ = stepZ > 0 ? (z + 1.0) : z;
+
+        double tMaxX = stepX == 0 ? Double.POSITIVE_INFINITY : (nextVoxelBoundaryX - ox) / d.getX();
+        double tMaxY = stepY == 0 ? Double.POSITIVE_INFINITY : (nextVoxelBoundaryY - oy) / d.getY();
+        double tMaxZ = stepZ == 0 ? Double.POSITIVE_INFINITY : (nextVoxelBoundaryZ - oz) / d.getZ();
+
+        // Clamp negative due to numeric issues.
+        if (tMaxX < 0) tMaxX = 0;
+        if (tMaxY < 0) tMaxY = 0;
+        if (tMaxZ < 0) tMaxZ = 0;
+
+        double t = 0.0;
+        while (t <= limit) {
+            Location blockLoc = new Location(eye.getWorld(), x, y, z);
+            if (CloudFrameRegistry.tubes().getTube(blockLoc) != null) return blockLoc;
+            if (CloudFrameRegistry.quarries().hasControllerAt(blockLoc)) return blockLoc;
+
+            // Step to next voxel.
+            if (tMaxX <= tMaxY && tMaxX <= tMaxZ) {
+                x += stepX;
+                t = tMaxX;
+                tMaxX += tDeltaX;
+            } else if (tMaxY <= tMaxX && tMaxY <= tMaxZ) {
+                y += stepY;
+                t = tMaxY;
+                tMaxY += tDeltaY;
+            } else {
+                z += stepZ;
+                t = tMaxZ;
+                tMaxZ += tDeltaZ;
+            }
         }
 
         return null;
-    }
-
-    private static Location findNearestVirtualAtOrNear(Location eye, Vector sample, int bx, int by, int bz, double maxDistSqToAabb) {
-        if (eye == null || eye.getWorld() == null) return null;
-
-        // Check the sampled block plus immediate neighbors. This makes selection robust
-        // when the crosshair ray grazes a tube's blockspace (common at junctions).
-        int[][] offsets = new int[][] {
-            {0, 0, 0},
-            {1, 0, 0}, {-1, 0, 0},
-            {0, 1, 0}, {0, -1, 0},
-            {0, 0, 1}, {0, 0, -1}
-        };
-
-        Location bestLoc = null;
-        double bestDistSq = Double.POSITIVE_INFINITY;
-
-        for (int[] o : offsets) {
-            int x = bx + o[0];
-            int y = by + o[1];
-            int z = bz + o[2];
-
-            Location cand = new Location(eye.getWorld(), x, y, z);
-            boolean isTube = CloudFrameRegistry.tubes().getTube(cand) != null;
-            boolean isController = !isTube && CloudFrameRegistry.quarries().hasControllerAt(cand);
-            if (!isTube && !isController) continue;
-
-            double distSq = distSqPointToUnitAabb(sample.getX(), sample.getY(), sample.getZ(), x, y, z);
-            if (distSq <= maxDistSqToAabb && distSq < bestDistSq) {
-                bestDistSq = distSq;
-                bestLoc = cand;
-            }
-        }
-
-        return bestLoc;
-    }
-
-    private static double distSqPointToUnitAabb(double px, double py, double pz, int ax, int ay, int az) {
-        double dx = 0.0;
-        if (px < ax) dx = ax - px;
-        else if (px > ax + 1.0) dx = px - (ax + 1.0);
-
-        double dy = 0.0;
-        if (py < ay) dy = ay - py;
-        else if (py > ay + 1.0) dy = py - (ay + 1.0);
-
-        double dz = 0.0;
-        if (pz < az) dz = az - pz;
-        else if (pz > az + 1.0) dz = pz - (az + 1.0);
-
-        return dx * dx + dy * dy + dz * dz;
     }
 
     private static boolean isHighlightableEntity(Entity e) {

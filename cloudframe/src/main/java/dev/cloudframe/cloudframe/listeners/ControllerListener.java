@@ -7,6 +7,9 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.Directional;
+import org.bukkit.block.data.Bisected;
+import org.bukkit.block.data.type.Bed;
+import org.bukkit.FluidCollisionMode;
 import org.bukkit.entity.Interaction;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -133,6 +136,153 @@ public class ControllerListener implements Listener {
         }
 
         e.getPlayer().sendMessage("§6Quarry Controller placed.");
+    }
+
+    /**
+     * When using the client-side selection box, the client clicks a fake block at the controller
+     * coordinate. Server-side that block is air, so vanilla placement won't work.
+     *
+     * This handler makes controllers behave like a normal placement anchor: sneak-right-clicking
+     * the controller outline with a regular block item places that block into the adjacent blockspace.
+     *
+     * (Sneak is required so we don't override normal right-click behavior like opening the GUI.)
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onPlaceNormalBlockAgainstController(PlayerInteractEvent e) {
+        if (e.getHand() != EquipmentSlot.HAND) return;
+
+        final Action action = e.getAction();
+        if (action != Action.RIGHT_CLICK_BLOCK && action != Action.RIGHT_CLICK_AIR) return;
+
+        // Mimic vanilla "place against interactable block" behavior.
+        if (!e.getPlayer().isSneaking()) return;
+
+        ItemStack handItem = e.getPlayer().getInventory().getItemInMainHand();
+        if (handItem == null || handItem.getType().isAir()) return;
+
+        // Don't interfere with our own placement items.
+        if (CustomBlocks.isControllerItem(handItem)) return;
+        if (CustomBlocks.isTubeItem(handItem)) return;
+
+        Material held = handItem.getType();
+        if (!held.isBlock()) return;
+
+        // Avoid half-baked multi-block placement (doors, tall flowers, beds, etc.).
+        // These should be placed against a real vanilla block so vanilla can handle the second part.
+        try {
+            BlockData heldData = held.createBlockData();
+            if (heldData instanceof Bisected || heldData instanceof Bed) {
+                return;
+            }
+        } catch (Throwable ignored) {
+            // Best-effort.
+        }
+
+        Location baseControllerLoc = null;
+        BlockFace face = null;
+
+        if (action == Action.RIGHT_CLICK_BLOCK) {
+            Block clicked = e.getClickedBlock();
+            if (clicked == null) return;
+
+            // Only take over when the clicked block is actually air (selection-box scenario).
+            // If it's not air, let vanilla placement work normally.
+            if (!clicked.getType().isAir()) return;
+
+            Location maybeControllerLoc = clicked.getLocation();
+            if (!CloudFrameRegistry.quarries().hasControllerAt(maybeControllerLoc)) return;
+
+            baseControllerLoc = maybeControllerLoc;
+            face = e.getBlockFace();
+        } else {
+            // RIGHT_CLICK_AIR fallback: voxel ray-walk for the controller blockspace.
+            baseControllerLoc = raytraceLookedController(e.getPlayer());
+        }
+
+        if (baseControllerLoc == null || baseControllerLoc.getWorld() == null) return;
+
+        if (face == null) {
+            Location target = computeAdjacentFromLook(baseControllerLoc, e.getPlayer().getEyeLocation().getDirection());
+            if (target == null) return;
+            placeSimpleBlock(e, handItem, held, target);
+            return;
+        }
+
+        Location targetLoc = baseControllerLoc.clone().add(face.getModX(), face.getModY(), face.getModZ());
+        placeSimpleBlock(e, handItem, held, targetLoc);
+    }
+
+    private static void placeSimpleBlock(PlayerInteractEvent e, ItemStack handItem, Material held, Location targetLoc) {
+        if (targetLoc == null || targetLoc.getWorld() == null) return;
+
+        // Prevent placing into occupied entity-only blockspaces.
+        if (CloudFrameRegistry.tubes().getTube(targetLoc) != null) return;
+        if (CloudFrameRegistry.quarries().hasControllerAt(targetLoc)) return;
+
+        Block target = targetLoc.getBlock();
+        if (!target.getType().isAir()) return;
+
+        // We are handling this interaction; prevent other plugins from treating this as use-item.
+        e.setCancelled(true);
+
+        target.setType(held, true);
+
+        // Best-effort facing like vanilla placement.
+        try {
+            BlockData data = target.getBlockData();
+            if (data instanceof Directional directional) {
+                BlockFace facing = e.getPlayer().getFacing().getOppositeFace();
+                if (directional.getFaces().contains(facing)) {
+                    directional.setFacing(facing);
+                    target.setBlockData(directional, true);
+                }
+            }
+        } catch (Throwable ignored) {
+            // Best-effort.
+        }
+
+        if (e.getPlayer().getGameMode() != GameMode.CREATIVE) {
+            int amt = handItem.getAmount();
+            if (amt <= 1) {
+                e.getPlayer().getInventory().setItemInMainHand(null);
+            } else {
+                handItem.setAmount(amt - 1);
+                e.getPlayer().getInventory().setItemInMainHand(handItem);
+            }
+        }
+    }
+
+    private static Location raytraceLookedController(org.bukkit.entity.Player player) {
+        if (player == null) return null;
+
+        Location eye = player.getEyeLocation();
+        Vector dir = eye.getDirection();
+
+        // Don't target through solid blocks; mimic vanilla LOS.
+        double limit = 6.0;
+        RayTraceResult br = player.getWorld().rayTraceBlocks(eye, dir, limit, FluidCollisionMode.NEVER, true);
+        if (br != null && br.getHitPosition() != null) {
+            limit = eye.toVector().distance(br.getHitPosition());
+            limit = Math.max(0.0, limit - 0.01);
+        }
+
+        // Primary: voxel ray-walk (matches vanilla block targeting).
+        Location dd = findFirstControllerBlockspaceAlongRay(eye, dir, limit);
+        if (dd != null) return dd;
+
+        // Fallback: raytrace the Interaction entity (keep radius small to avoid adjacent hits).
+        if (CloudFrameRegistry.quarries().visualsManager() == null) return null;
+
+        RayTraceResult rr = player.getWorld().rayTraceEntities(
+            eye,
+            dir,
+            limit,
+            0.12,
+            ent -> (ent instanceof Interaction) && CloudFrameRegistry.quarries().visualsManager().getTaggedControllerLocation(ent.getPersistentDataContainer()) != null
+        );
+
+        if (rr == null || rr.getHitEntity() == null) return null;
+        return CloudFrameRegistry.quarries().visualsManager().getTaggedControllerLocation(rr.getHitEntity().getPersistentDataContainer());
     }
 
     private static int snapYaw(float yaw) {
@@ -621,25 +771,72 @@ public class ControllerListener implements Listener {
         double blockDist = player.getEyeLocation().distance(breakingBlockLoc.clone().add(0.5, 0.5, 0.5));
         double maxDist = Math.min(6.0, blockDist + 0.5);
 
-        RayTraceResult rr = player.getWorld().rayTraceEntities(
-            player.getEyeLocation(),
-            player.getEyeLocation().getDirection(),
-            maxDist,
-            0.2,
-            ent -> (ent instanceof Interaction) && CloudFrameRegistry.quarries().visualsManager().getTaggedControllerLocation(ent.getPersistentDataContainer()) != null
-        );
-
-        if (rr == null || rr.getHitEntity() == null) return null;
-
-        Location controllerLoc = CloudFrameRegistry.quarries().visualsManager().getTaggedControllerLocation(
-            rr.getHitEntity().getPersistentDataContainer()
-        );
+        Location controllerLoc = findFirstControllerBlockspaceAlongRay(player.getEyeLocation(), player.getEyeLocation().getDirection(), maxDist);
         if (controllerLoc == null) return null;
 
-        // If the controller is basically the thing you're aiming at (i.e. closer than the block), treat it as a controller hit.
-        double entityDist = player.getEyeLocation().distance(rr.getHitEntity().getLocation());
-        if (entityDist > blockDist + 0.25) return null;
+        double ctrlDist = player.getEyeLocation().distance(controllerLoc.clone().add(0.5, 0.5, 0.5));
+        if (ctrlDist > blockDist + 0.25) return null;
 
         return new PlayerInteractEntityEventShim(controllerLoc);
+    }
+
+    private static Location findFirstControllerBlockspaceAlongRay(Location eye, Vector dir, double limit) {
+        if (eye == null || eye.getWorld() == null || dir == null) return null;
+        if (limit <= 0.0) return null;
+
+        Vector d = dir.clone();
+        double len = d.length();
+        if (len == 0.0) return null;
+        d.multiply(1.0 / len);
+
+        double ox = eye.getX() + d.getX() * 0.01;
+        double oy = eye.getY() + d.getY() * 0.01;
+        double oz = eye.getZ() + d.getZ() * 0.01;
+
+        int x = (int) Math.floor(ox);
+        int y = (int) Math.floor(oy);
+        int z = (int) Math.floor(oz);
+
+        int stepX = d.getX() > 0 ? 1 : (d.getX() < 0 ? -1 : 0);
+        int stepY = d.getY() > 0 ? 1 : (d.getY() < 0 ? -1 : 0);
+        int stepZ = d.getZ() > 0 ? 1 : (d.getZ() < 0 ? -1 : 0);
+
+        double tDeltaX = stepX == 0 ? Double.POSITIVE_INFINITY : Math.abs(1.0 / d.getX());
+        double tDeltaY = stepY == 0 ? Double.POSITIVE_INFINITY : Math.abs(1.0 / d.getY());
+        double tDeltaZ = stepZ == 0 ? Double.POSITIVE_INFINITY : Math.abs(1.0 / d.getZ());
+
+        double nextVoxelBoundaryX = stepX > 0 ? (x + 1.0) : x;
+        double nextVoxelBoundaryY = stepY > 0 ? (y + 1.0) : y;
+        double nextVoxelBoundaryZ = stepZ > 0 ? (z + 1.0) : z;
+
+        double tMaxX = stepX == 0 ? Double.POSITIVE_INFINITY : (nextVoxelBoundaryX - ox) / d.getX();
+        double tMaxY = stepY == 0 ? Double.POSITIVE_INFINITY : (nextVoxelBoundaryY - oy) / d.getY();
+        double tMaxZ = stepZ == 0 ? Double.POSITIVE_INFINITY : (nextVoxelBoundaryZ - oz) / d.getZ();
+
+        if (tMaxX < 0) tMaxX = 0;
+        if (tMaxY < 0) tMaxY = 0;
+        if (tMaxZ < 0) tMaxZ = 0;
+
+        double t = 0.0;
+        while (t <= limit) {
+            Location blockLoc = new Location(eye.getWorld(), x, y, z);
+            if (CloudFrameRegistry.quarries().hasControllerAt(blockLoc)) return blockLoc;
+
+            if (tMaxX <= tMaxY && tMaxX <= tMaxZ) {
+                x += stepX;
+                t = tMaxX;
+                tMaxX += tDeltaX;
+            } else if (tMaxY <= tMaxX && tMaxY <= tMaxZ) {
+                y += stepY;
+                t = tMaxY;
+                tMaxY += tDeltaY;
+            } else {
+                z += stepZ;
+                t = tMaxZ;
+                tMaxZ += tDeltaZ;
+            }
+        }
+
+        return null;
     }
 }

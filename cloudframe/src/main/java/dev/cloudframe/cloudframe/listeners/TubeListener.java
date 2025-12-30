@@ -443,14 +443,70 @@ public class TubeListener implements Listener {
         }
 
         // Fallback: scan blockspaces along the ray to find a tube location.
-        final double step = 0.15;
+        final double step = 0.10;
+        final double maxDistSqToAabb = 0.35 * 0.35;
+
         for (double d = 0.0; d <= limit; d += step) {
-            Location sample = eye.clone().add(dir.clone().multiply(d));
-            Location blockLoc = new Location(sample.getWorld(), sample.getBlockX(), sample.getBlockY(), sample.getBlockZ());
-            if (CloudFrameRegistry.tubes().getTube(blockLoc) != null) return blockLoc;
+            Location sampleLoc = eye.clone().add(dir.clone().multiply(d));
+            int bx = sampleLoc.getBlockX();
+            int by = sampleLoc.getBlockY();
+            int bz = sampleLoc.getBlockZ();
+
+            Location best = findNearestTubeAtOrNear(sampleLoc, bx, by, bz, maxDistSqToAabb);
+            if (best != null) return best;
         }
 
         return null;
+    }
+
+    private static Location findNearestTubeAtOrNear(Location sampleLoc, int bx, int by, int bz, double maxDistSqToAabb) {
+        if (sampleLoc == null || sampleLoc.getWorld() == null) return null;
+
+        int[][] offsets = new int[][] {
+            {0, 0, 0},
+            {1, 0, 0}, {-1, 0, 0},
+            {0, 1, 0}, {0, -1, 0},
+            {0, 0, 1}, {0, 0, -1}
+        };
+
+        Location bestLoc = null;
+        double bestDistSq = Double.POSITIVE_INFINITY;
+
+        double px = sampleLoc.getX();
+        double py = sampleLoc.getY();
+        double pz = sampleLoc.getZ();
+
+        for (int[] o : offsets) {
+            int x = bx + o[0];
+            int y = by + o[1];
+            int z = bz + o[2];
+            Location cand = new Location(sampleLoc.getWorld(), x, y, z);
+            if (CloudFrameRegistry.tubes().getTube(cand) == null) continue;
+
+            double distSq = distSqPointToUnitAabb(px, py, pz, x, y, z);
+            if (distSq <= maxDistSqToAabb && distSq < bestDistSq) {
+                bestDistSq = distSq;
+                bestLoc = cand;
+            }
+        }
+
+        return bestLoc;
+    }
+
+    private static double distSqPointToUnitAabb(double px, double py, double pz, int ax, int ay, int az) {
+        double dx = 0.0;
+        if (px < ax) dx = ax - px;
+        else if (px > ax + 1.0) dx = px - (ax + 1.0);
+
+        double dy = 0.0;
+        if (py < ay) dy = ay - py;
+        else if (py > ay + 1.0) dy = py - (ay + 1.0);
+
+        double dz = 0.0;
+        if (pz < az) dz = az - pz;
+        else if (pz > az + 1.0) dz = pz - (az + 1.0);
+
+        return dx * dx + dy * dy + dz * dz;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)

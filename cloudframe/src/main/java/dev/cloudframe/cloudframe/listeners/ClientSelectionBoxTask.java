@@ -198,7 +198,8 @@ public final class ClientSelectionBoxTask {
     private static Location scanVirtualBlockspacesAlongRay(Location eye, Vector dir, double limit) {
         if (eye == null || eye.getWorld() == null || dir == null) return null;
 
-        final double step = 0.15; // small step keeps it responsive without being too expensive
+        final double step = 0.10; // smaller step reduces misses on thin geometry / grazing angles
+        final double maxDistSqToAabb = 0.35 * 0.35; // how close the ray must be to the blockspace
 
         Location sample = eye.clone();
         for (double d = 0.0; d <= limit; d += step) {
@@ -208,22 +209,66 @@ public final class ClientSelectionBoxTask {
                 eye.getZ() + dir.getZ() * d
             );
 
-            Location blockLoc = new Location(
-                eye.getWorld(),
-                sample.getBlockX(),
-                sample.getBlockY(),
-                sample.getBlockZ()
-            );
+            int bx = sample.getBlockX();
+            int by = sample.getBlockY();
+            int bz = sample.getBlockZ();
 
-            if (CloudFrameRegistry.tubes().getTube(blockLoc) != null) {
-                return blockLoc;
-            }
-            if (CloudFrameRegistry.quarries().hasControllerAt(blockLoc)) {
-                return blockLoc;
-            }
+            Location best = findNearestVirtualAtOrNear(eye, sample.toVector(), bx, by, bz, maxDistSqToAabb);
+            if (best != null) return best;
         }
 
         return null;
+    }
+
+    private static Location findNearestVirtualAtOrNear(Location eye, Vector sample, int bx, int by, int bz, double maxDistSqToAabb) {
+        if (eye == null || eye.getWorld() == null) return null;
+
+        // Check the sampled block plus immediate neighbors. This makes selection robust
+        // when the crosshair ray grazes a tube's blockspace (common at junctions).
+        int[][] offsets = new int[][] {
+            {0, 0, 0},
+            {1, 0, 0}, {-1, 0, 0},
+            {0, 1, 0}, {0, -1, 0},
+            {0, 0, 1}, {0, 0, -1}
+        };
+
+        Location bestLoc = null;
+        double bestDistSq = Double.POSITIVE_INFINITY;
+
+        for (int[] o : offsets) {
+            int x = bx + o[0];
+            int y = by + o[1];
+            int z = bz + o[2];
+
+            Location cand = new Location(eye.getWorld(), x, y, z);
+            boolean isTube = CloudFrameRegistry.tubes().getTube(cand) != null;
+            boolean isController = !isTube && CloudFrameRegistry.quarries().hasControllerAt(cand);
+            if (!isTube && !isController) continue;
+
+            double distSq = distSqPointToUnitAabb(sample.getX(), sample.getY(), sample.getZ(), x, y, z);
+            if (distSq <= maxDistSqToAabb && distSq < bestDistSq) {
+                bestDistSq = distSq;
+                bestLoc = cand;
+            }
+        }
+
+        return bestLoc;
+    }
+
+    private static double distSqPointToUnitAabb(double px, double py, double pz, int ax, int ay, int az) {
+        double dx = 0.0;
+        if (px < ax) dx = ax - px;
+        else if (px > ax + 1.0) dx = px - (ax + 1.0);
+
+        double dy = 0.0;
+        if (py < ay) dy = ay - py;
+        else if (py > ay + 1.0) dy = py - (ay + 1.0);
+
+        double dz = 0.0;
+        if (pz < az) dz = az - pz;
+        else if (pz > az + 1.0) dz = pz - (az + 1.0);
+
+        return dx * dx + dy * dy + dz * dz;
     }
 
     private static boolean isHighlightableEntity(Entity e) {

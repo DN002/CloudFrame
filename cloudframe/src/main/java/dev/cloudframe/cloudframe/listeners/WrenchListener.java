@@ -5,6 +5,7 @@ import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 
 import dev.cloudframe.cloudframe.core.CloudFrameRegistry;
@@ -33,21 +34,6 @@ public class WrenchListener implements Listener {
 
         Location clicked = e.getClickedBlock().getLocation();
         debug.log("onInteract", "Player " + p.getName() + " used Cloud Wrench at " + clicked);
-
-        // Check if clicking a copper block (unregistered quarry controller)
-        if (e.getClickedBlock().getType() == Material.COPPER_BLOCK) {
-            // Check if this block is already a registered controller
-            for (Quarry q : CloudFrameRegistry.quarries().all()) {
-                if (q.getController().equals(clicked)) {
-                    debug.log("onInteract", "Clicked block is already a registered controller");
-                    return; // Already registered, let ControllerListener handle it
-                }
-            }
-
-            // This is a placed controller block that needs to be registered
-            finalizeQuarryWithBlock(p, clicked, e);
-            return;
-        }
 
         // Must have both marker positions for frame creation
         if (!CloudFrameRegistry.markers().hasBoth(p.getUniqueId())) {
@@ -120,42 +106,20 @@ public class WrenchListener implements Listener {
         // Determine if clicked block is part of the frame (glass)
         boolean clickedIsFrame = e.getClickedBlock().getType() == Material.GLASS;
 
-        // Ensure controller location is free or already a copper block
-        var existingType = controller.getBlock().getType();
-        if (!existingType.isAir() && existingType != Material.COPPER_BLOCK) {
-            debug.log("onInteract", "Controller location obstructed at " + controller);
-            p.sendMessage("§cController location is obstructed.");
+        // If creating from markers (building the frame), do NOT auto-place a controller.
+        // Controllers are entity-only now; the player places it separately.
+        if (creatingFromMarkers) {
+            debug.log("onInteract", "Building quarry border for region (markers) " + region + " — not placing controller");
+            buildBorder(region);
+            p.sendMessage("§aQuarry frame created. Place a Quarry Controller adjacent to the frame, then use the wrench on it to finalize.");
+            CloudFrameRegistry.markers().clear(p.getUniqueId());
+            debug.log("onInteract", "Cleared markers for " + p.getName());
             return;
         }
 
-        // If a controller block already exists at the computed controller location, reuse it
-        if (existingType == Material.COPPER_BLOCK) {
-            debug.log("onInteract", "Controller block already present at " + controller + " — reusing");
-        } else {
-            // If creating from markers (building the frame), do NOT auto-place the copper controller.
-            if (creatingFromMarkers) {
-                debug.log("onInteract", "Building quarry border for region (markers) " + region + " — not placing controller");
-                buildBorder(region);
-                p.sendMessage("§aQuarry frame created. Place a copper block adjacent to the frame, then use the wrench to finalize the controller.");
-                // Clear markers since frame is created
-                CloudFrameRegistry.markers().clear(p.getUniqueId());
-                debug.log("onInteract", "Cleared markers for " + p.getName());
-                return;
-            }
-
-            // If the player clicked on the glass frame, don't create a copper block out of thin air.
-            if (clickedIsFrame) {
-                debug.log("onInteract", "Clicked frame but no controller present; not auto-placing copper");
-                p.sendMessage("§cPlace a controller block (copper) adjacent to the frame, then use the wrench to finalize.");
-                return;
-            }
-
-            debug.log("onInteract", "Building quarry border for region " + region);
-            buildBorder(region);
-
-            // Place controller block
-            controller.getBlock().setType(Material.COPPER_BLOCK);
-            debug.log("onInteract", "Placed controller block at " + controller);
+        if (clickedIsFrame) {
+            p.sendMessage("§cPlace a Quarry Controller adjacent to the frame, then use the wrench to finalize.");
+            return;
         }
 
         // Register quarry
@@ -164,7 +128,8 @@ public class WrenchListener implements Listener {
                 a,
                 b,
                 region,
-                controller
+            controller,
+            0
         );
 
         CloudFrameRegistry.quarries().register(quarry);
@@ -175,6 +140,35 @@ public class WrenchListener implements Listener {
         // Clear markers
         CloudFrameRegistry.markers().clear(p.getUniqueId());
         debug.log("onInteract", "Cleared markers for " + p.getName());
+    }
+
+    @EventHandler
+    public void onInteractControllerEntity(PlayerInteractEntityEvent e) {
+        Player p = e.getPlayer();
+
+        if (!isWrench(p.getInventory().getItemInMainHand())) {
+            return;
+        }
+
+        if (CloudFrameRegistry.quarries().visualsManager() == null) {
+            return;
+        }
+
+        Location controllerLoc = CloudFrameRegistry.quarries().visualsManager().getTaggedControllerLocation(
+                e.getRightClicked().getPersistentDataContainer()
+        );
+        if (controllerLoc == null) {
+            return;
+        }
+
+        // Already registered? Let ControllerListener handle opening the GUI.
+        if (CloudFrameRegistry.quarries().getByController(controllerLoc) != null) {
+            return;
+        }
+
+        debug.log("onInteract", "Finalizing quarry via controller entity at " + controllerLoc);
+        finalizeQuarryAt(p, controllerLoc);
+        e.setCancelled(true);
     }
 
     @SuppressWarnings("deprecation")
@@ -217,69 +211,139 @@ public class WrenchListener implements Listener {
      */
     private Region inferRegionFromBorder(Location controllerLoc) {
         var world = controllerLoc.getWorld();
-        int y = controllerLoc.getBlockY();
+        if (world == null) return null;
 
-        int range = QUARRY_SIZE + 3;
-        Integer minX = null, maxX = null, minZ = null, maxZ = null;
+        int baseY = controllerLoc.getBlockY();
 
-        for (int dx = -range; dx <= range; dx++) {
-            for (int dz = -range; dz <= range; dz++) {
-                int x = controllerLoc.getBlockX() + dx;
-                int z = controllerLoc.getBlockZ() + dz;
-                if (x < controllerLoc.getBlockX() - range || x > controllerLoc.getBlockX() + range) continue;
-                if (z < controllerLoc.getBlockZ() - range || z > controllerLoc.getBlockZ() + range) continue;
+        // With entity-only controllers, players often place the controller one block higher/lower
+        // than the glass frame plane. Search a small vertical band for a valid frame.
+        int[] yCandidates = new int[] { baseY, baseY - 1, baseY + 1, baseY - 2, baseY + 2 };
 
-                if (world.getBlockAt(x, y, z).getType() == Material.GLASS) {
-                    if (minX == null || x < minX) minX = x;
-                    if (maxX == null || x > maxX) maxX = x;
-                    if (minZ == null || z < minZ) minZ = z;
-                    if (maxZ == null || z > maxZ) maxZ = z;
+        int range = QUARRY_SIZE + 6;
+        int cx = controllerLoc.getBlockX();
+        int cz = controllerLoc.getBlockZ();
+
+        // 4-neighbor plane adjacency
+        final int[][] DIRS_2D = new int[][] { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+
+        for (int y : yCandidates) {
+            // Controller must be adjacent to the glass frame on this Y plane.
+            Location start = null;
+            for (int[] d : DIRS_2D) {
+                int sx = cx + d[0];
+                int sz = cz + d[1];
+                if (world.getBlockAt(sx, y, sz).getType() == Material.GLASS) {
+                    start = new Location(world, sx, y, sz);
+                    break;
                 }
             }
-        }
 
-        if (minX == null || maxX == null || minZ == null || maxZ == null) {
-            return null;
-        }
+            if (start == null) {
+                debug.log("inferRegionFromBorder", "No adjacent glass at y=" + y + " for controller=" + controllerLoc);
+                continue;
+            }
 
-        int width = maxX - minX + 1;
-        int length = maxZ - minZ + 1;
+            // Flood-fill only the connected glass component so other nearby glass doesn't break bounds.
+            java.util.ArrayDeque<Location> queue = new java.util.ArrayDeque<>();
+            java.util.HashSet<Long> visited = new java.util.HashSet<>();
+            queue.add(start);
 
-        // We expect the glass frame to be two blocks larger than the inner quarry region
-        if (width != QUARRY_SIZE + 2 || length != QUARRY_SIZE + 2) {
-            debug.log("inferRegionFromBorder", "Found glass frame but dimensions not valid: " + width + "x" + length);
-            return null;
-        }
+            Integer minX = null, maxX = null, minZ = null, maxZ = null;
+            int glassCount = 0;
 
-        // Inner region (one block inside the detected glass frame)
-        int innerMinX = minX + 1;
-        int innerMaxX = maxX - 1;
-        int innerMinZ = minZ + 1;
-        int innerMaxZ = maxZ - 1;
+            while (!queue.isEmpty()) {
+                Location cur = queue.removeFirst();
+                int x = cur.getBlockX();
+                int z = cur.getBlockZ();
 
-        int topY = y;
-        int bottomY = world.getMinHeight();
+                // Bound search to avoid runaway scans.
+                if (Math.abs(x - cx) > range || Math.abs(z - cz) > range) {
+                    continue;
+                }
 
-        return new Region(
+                long key = (((long) x) << 32) ^ (z & 0xffffffffL);
+                if (!visited.add(key)) continue;
+
+                if (world.getBlockAt(x, y, z).getType() != Material.GLASS) continue;
+
+                glassCount++;
+                if (minX == null || x < minX) minX = x;
+                if (maxX == null || x > maxX) maxX = x;
+                if (minZ == null || z < minZ) minZ = z;
+                if (maxZ == null || z > maxZ) maxZ = z;
+
+                for (int[] d : DIRS_2D) {
+                    queue.add(new Location(world, x + d[0], y, z + d[1]));
+                }
+            }
+
+            if (minX == null || maxX == null || minZ == null || maxZ == null) {
+                debug.log("inferRegionFromBorder", "Adjacent glass component empty at y=" + y + " controller=" + controllerLoc);
+                continue;
+            }
+
+            int width = maxX - minX + 1;
+            int length = maxZ - minZ + 1;
+
+            debug.log(
+                "inferRegionFromBorder",
+                "Candidate connected frame at y=" + y + " bounds=" + minX + ".." + maxX + "," + minZ + ".." + maxZ +
+                " size=" + width + "x" + length + " glassCount=" + glassCount
+            );
+
+            // The outer glass frame is QUARRY_SIZE + 2 on each axis.
+            if (width != QUARRY_SIZE + 2 || length != QUARRY_SIZE + 2) {
+                continue;
+            }
+
+            // Validate it's a complete border ring (glass all along the perimeter).
+            boolean borderOk = true;
+            for (int x = minX; x <= maxX && borderOk; x++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    boolean border = x == minX || x == maxX || z == minZ || z == maxZ;
+                    if (!border) continue;
+                    if (world.getBlockAt(x, y, z).getType() != Material.GLASS) {
+                        borderOk = false;
+                        break;
+                    }
+                }
+            }
+            if (!borderOk) {
+                debug.log("inferRegionFromBorder", "Frame perimeter check failed at y=" + y + " for bounds=" + minX + ".." + maxX + "," + minZ + ".." + maxZ);
+                continue;
+            }
+
+            int innerMinX = minX + 1;
+            int innerMaxX = maxX - 1;
+            int innerMinZ = minZ + 1;
+            int innerMaxZ = maxZ - 1;
+
+            int topY = y;
+            int bottomY = world.getMinHeight();
+
+            return new Region(
                 new Location(world, innerMinX, bottomY, innerMinZ),
                 new Location(world, innerMaxX, topY, innerMaxZ)
-        );
+            );
+        }
+
+        return null;
     }
 
-    private void finalizeQuarryWithBlock(Player p, Location controllerLoc, PlayerInteractEvent e) {
-        debug.log("finalizeQuarryWithBlock", "Finalizing quarry at placed controller " + controllerLoc);
+    private void finalizeQuarryAt(Player p, Location controllerLoc) {
+        debug.log("finalizeQuarryAt", "Finalizing quarry at placed controller " + controllerLoc);
 
         // Must have both marker positions
         Region region;
         if (!CloudFrameRegistry.markers().hasBoth(p.getUniqueId())) {
-            debug.log("finalizeQuarryWithBlock", "Player " + p.getName() + " missing marker positions — attempting to infer region from nearby frame");
+            debug.log("finalizeQuarryAt", "Player " + p.getName() + " missing marker positions — attempting to infer region from nearby frame");
             region = inferRegionFromBorder(controllerLoc);
             if (region == null) {
-                debug.log("finalizeQuarryWithBlock", "Could not infer region from border for controller " + controllerLoc);
+                debug.log("finalizeQuarryAt", "Could not infer region from border for controller " + controllerLoc);
                 p.sendMessage("§cYou must set both marker positions first (or place the controller adjacent to a visible frame).");
                 return;
             }
-            debug.log("finalizeQuarryWithBlock", "Inferred region from border: " + region);
+            debug.log("finalizeQuarryAt", "Inferred region from border: " + region);
         } else {
             // Get marker positions
             Location a = CloudFrameRegistry.markers().getPosA(p.getUniqueId());
@@ -287,7 +351,7 @@ public class WrenchListener implements Listener {
             region = new Region(a, b);
         }
 
-        debug.log("finalizeQuarryWithBlock", "Raw region: " + region);
+        debug.log("finalizeQuarryAt", "Raw region: " + region);
 
         // Expand region vertically: top = controller Y, bottom = world min height
         int topY = controllerLoc.getBlockY();
@@ -298,20 +362,20 @@ public class WrenchListener implements Listener {
                 new Location(region.getWorld(), region.maxX(), topY, region.maxZ())
         );
 
-        debug.log("finalizeQuarryWithBlock", "Expanded vertical region: " + region);
+        debug.log("finalizeQuarryAt", "Expanded vertical region: " + region);
 
         // Validate size
         if (region.width() != QUARRY_SIZE || region.length() != QUARRY_SIZE) {
-            debug.log("finalizeQuarryWithBlock", "Invalid quarry size: width=" + region.width() +
+                debug.log("finalizeQuarryAt", "Invalid quarry size: width=" + region.width() +
                     " length=" + region.length());
-            p.sendMessage("§cQuarry must be exactly " + QUARRY_SIZE + "x" + QUARRY_SIZE + ".");
+            p.sendMessage("§cQuarry must be exactly " + QUARRY_SIZE + "x" + QUARRY_SIZE + " (got " + region.width() + "x" + region.length() + ").");
             return;
         }
 
         // Check overlap with existing quarries
         for (Quarry q : CloudFrameRegistry.quarries().all()) {
             if (q.getRegion().intersects(region)) {
-                debug.log("finalizeQuarryWithBlock", "Quarry overlap detected with existing quarry owner=" + q.getOwner());
+                debug.log("finalizeQuarryAt", "Quarry overlap detected with existing quarry owner=" + q.getOwner());
                 p.sendMessage("§cThis quarry overlaps an existing quarry.");
                 return;
             }
@@ -354,35 +418,40 @@ public class WrenchListener implements Listener {
                 return;
             }
 
-            debug.log("finalizeQuarryWithBlock", "Controller adjacent to frame — accepting placement at " + controllerLoc);
+            debug.log("finalizeQuarryAt", "Controller adjacent to frame — accepting placement at " + controllerLoc);
         }
 
         // Build border (if not already present)
-        debug.log("finalizeQuarryWithBlock", "Building quarry border for region " + region);
+        debug.log("finalizeQuarryAt", "Building quarry border for region " + region);
         buildBorder(region);
 
         // Prepare posA/posB for constructor (use region corners)
         Location aLoc = new Location(region.getWorld(), region.minX(), region.minY(), region.minZ());
         Location bLoc = new Location(region.getWorld(), region.maxX(), region.maxY(), region.maxZ());
 
-        // Register quarry with the placed copper block as controller
+        // Register quarry with the placed controller block as controller
+        int controllerYaw = CloudFrameRegistry.quarries().getControllerYaw(controllerLoc);
         Quarry quarry = new Quarry(
             p.getUniqueId(),
             aLoc,
             bLoc,
             region,
-            controllerLoc
+            controllerLoc,
+            controllerYaw
         );
 
         CloudFrameRegistry.quarries().register(quarry);
-        debug.log("finalizeQuarryWithBlock", "Registered new quarry for owner=" + p.getUniqueId());
+        debug.log("finalizeQuarryAt", "Registered new quarry for owner=" + p.getUniqueId());
 
-        p.sendMessage("§aQuarry frame finalized.");
+        p.sendMessage("§aQuarry controller finalized.");
 
         // Clear markers
         CloudFrameRegistry.markers().clear(p.getUniqueId());
-        debug.log("finalizeQuarryWithBlock", "Cleared markers for " + p.getName());
+        debug.log("finalizeQuarryAt", "Cleared markers for " + p.getName());
 
-        e.setCancelled(true);
+        // Ensure controller visuals exist for the now-registered quarry.
+        if (CloudFrameRegistry.quarries().visualsManager() != null) {
+            CloudFrameRegistry.quarries().visualsManager().ensureController(controllerLoc, controllerYaw);
+        }
     }
 }

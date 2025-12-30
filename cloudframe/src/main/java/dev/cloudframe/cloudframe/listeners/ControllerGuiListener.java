@@ -146,6 +146,28 @@ public class ControllerGuiListener implements Listener {
         if (name.contains("Remove")) {
             p.sendMessage("§4Quarry removed.");
             dev.cloudframe.cloudframe.core.CloudFrameRegistry.quarries().remove(q);
+
+            // Ensure nearby tube visuals update immediately.
+            if (q.getController() != null) {
+                var tubeVisuals = dev.cloudframe.cloudframe.core.CloudFrameRegistry.tubes().visualsManager();
+                if (tubeVisuals != null) {
+                    org.bukkit.util.Vector[] dirs = new org.bukkit.util.Vector[] {
+                        new org.bukkit.util.Vector(1, 0, 0),
+                        new org.bukkit.util.Vector(-1, 0, 0),
+                        new org.bukkit.util.Vector(0, 1, 0),
+                        new org.bukkit.util.Vector(0, -1, 0),
+                        new org.bukkit.util.Vector(0, 0, 1),
+                        new org.bukkit.util.Vector(0, 0, -1)
+                    };
+                    for (org.bukkit.util.Vector v : dirs) {
+                        var adj = q.getController().clone().add(v);
+                        if (dev.cloudframe.cloudframe.core.CloudFrameRegistry.tubes().getTube(adj) != null) {
+                            tubeVisuals.updateTubeAndNeighbors(adj);
+                        }
+                    }
+                }
+            }
+
             p.closeInventory();
             return;
         }

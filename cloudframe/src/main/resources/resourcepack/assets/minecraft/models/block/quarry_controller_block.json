@@ -1,0 +1,11 @@
+{
+  "parent": "minecraft:block/cube",
+  "textures": {
+    "down": "minecraft:item/quarry_controller",
+    "up": "minecraft:item/quarry_controller",
+    "north": "minecraft:item/quarry_controller_front",
+    "south": "minecraft:item/quarry_controller",
+    "west": "minecraft:item/quarry_controller",
+    "east": "minecraft:item/quarry_controller"
+  }
+}

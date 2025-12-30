@@ -5,6 +5,7 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.util.Vector;
 
 import dev.cloudframe.cloudframe.core.CloudFrameRegistry;
 import dev.cloudframe.cloudframe.tubes.ItemPacket;
@@ -25,6 +26,7 @@ public class Quarry {
     private final Location posA;
     private final Location posB;
     private final Location controller;
+    private final int controllerYaw;
 
     private final Region region;
     private boolean active = false;
@@ -54,12 +56,13 @@ public class Quarry {
 
     private final List<ItemStack> outputBuffer = new ArrayList<>();
 
-    public Quarry(UUID owner, Location posA, Location posB, Region region, Location controller) {
+    public Quarry(UUID owner, Location posA, Location posB, Region region, Location controller, int controllerYaw) {
         this.owner = owner;
         this.posA = posA;
         this.posB = posB;
         this.region = region;
         this.controller = controller;
+        this.controllerYaw = controllerYaw;
 
         // Start at the TOP of the region
         this.currentX = region.minX();
@@ -79,7 +82,8 @@ public class Quarry {
 
         debug.log("constructor", "Created quarry for owner=" + owner +
                 " region=" + region +
-                " controller=" + controller);
+            " controller=" + controller +
+            " yaw=" + controllerYaw);
     }
 
     public boolean isActive() {
@@ -141,6 +145,10 @@ public class Quarry {
 
     public Location getController() {
         return controller;
+    }
+
+    public int getControllerYaw() {
+        return controllerYaw;
     }
 
     public UUID getOwner() {
@@ -253,39 +261,51 @@ public class Quarry {
 
         if (shouldLog) debug.log("trySendToTube", "Attempting to route item...");
 
-        TubeNode nearestTube = null;
-        double bestDist = Double.MAX_VALUE;
+        // Controller must be physically connected to the tube network: require an adjacent tube.
+        final Vector[] DIRS = new Vector[] {
+            new Vector(1, 0, 0),
+            new Vector(-1, 0, 0),
+            new Vector(0, 1, 0),
+            new Vector(0, -1, 0),
+            new Vector(0, 0, 1),
+            new Vector(0, 0, -1)
+        };
 
-        for (TubeNode node : CloudFrameRegistry.tubes().all()) {
-            double dist = node.getLocation().distanceSquared(controller);
-            if (dist < bestDist) {
-                bestDist = dist;
-                nearestTube = node;
-            }
-        }
-
-        if (nearestTube == null) return;
-
-        List<Location> inventories = CloudFrameRegistry.tubes().findInventoriesNear(nearestTube);
-        if (inventories.isEmpty()) return;
-
-        Location bestInv = inventories.get(0);
-
-        TubeNode destTube = null;
-        for (TubeNode node : CloudFrameRegistry.tubes().all()) {
-            if (node.getLocation().distance(bestInv) < 1.5) {
-                destTube = node;
+        TubeNode startTube = null;
+        for (Vector v : DIRS) {
+            TubeNode node = CloudFrameRegistry.tubes().getTube(controller.clone().add(v));
+            if (node != null) {
+                startTube = node;
                 break;
             }
         }
 
-        if (destTube == null) return;
+        if (startTube == null) {
+            if (shouldLog) debug.log("trySendToTube", "No adjacent tube found for controller at " + controller + " — not connected");
+            return;
+        }
 
-        List<TubeNode> path = CloudFrameRegistry.tubes().findPath(nearestTube, destTube);
-        if (path == null) return;
+        List<Location> inventories = CloudFrameRegistry.tubes().findInventoriesNear(startTube);
+        if (inventories.isEmpty()) return;
 
-        ItemStack item = outputBuffer.remove(0);
-        CloudFrameRegistry.packets().add(new ItemPacket(item, path));
+        // Route to the first inventory we can reach.
+        for (Location invLoc : inventories) {
+            TubeNode destTube = null;
+            for (TubeNode node : CloudFrameRegistry.tubes().all()) {
+                if (node.getLocation().distance(invLoc) < 1.5) {
+                    destTube = node;
+                    break;
+                }
+            }
+            if (destTube == null) continue;
+
+            List<TubeNode> path = CloudFrameRegistry.tubes().findPath(startTube, destTube);
+            if (path == null) continue;
+
+            ItemStack item = outputBuffer.remove(0);
+            CloudFrameRegistry.packets().add(new ItemPacket(item, path));
+            return;
+        }
     }
 
     public double getProgressPercent() {

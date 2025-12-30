@@ -3,7 +3,9 @@ package dev.cloudframe.cloudframe.tubes;
 import org.bukkit.Location;
 import org.bukkit.block.Block;
 import org.bukkit.util.Vector;
+import org.bukkit.plugin.java.JavaPlugin;
 
+import dev.cloudframe.cloudframe.listeners.TubeVisualChunkListener;
 import dev.cloudframe.cloudframe.util.InventoryUtil;
 import dev.cloudframe.cloudframe.util.Debug;
 import dev.cloudframe.cloudframe.util.DebugManager;
@@ -16,8 +18,15 @@ public class TubeNetworkManager {
 
     private final Map<Location, TubeNode> tubes = new HashMap<>();
 
+    // Chunk index for spawning visuals on chunk load.
+    private final Map<ChunkKey, Set<Location>> tubesByChunk = new HashMap<>();
+
+    private TubeVisualManager visualManager;
+
+    private record ChunkKey(UUID worldId, int cx, int cz) {}
+
     // 6-direction adjacency vectors
-    private static final Vector[] DIRS = {
+    static final Vector[] DIRS = {
         new Vector(1,0,0),
         new Vector(-1,0,0),
         new Vector(0,1,0),
@@ -25,6 +34,30 @@ public class TubeNetworkManager {
         new Vector(0,0,1),
         new Vector(0,0,-1)
     };
+
+    public void initVisuals(JavaPlugin plugin) {
+        if (visualManager != null) return;
+        visualManager = new TubeVisualManager(this, plugin);
+        plugin.getServer().getPluginManager().registerEvents(new TubeVisualChunkListener(this), plugin);
+        debug.log("initVisuals", "Tube visuals initialized (entity-only)");
+    }
+
+    public void shutdownVisuals() {
+        if (visualManager != null) {
+            visualManager.shutdown();
+        }
+    }
+
+    public TubeVisualManager visualsManager() {
+        return visualManager;
+    }
+
+    public Collection<Location> tubeLocationsInChunk(org.bukkit.Chunk chunk) {
+        ChunkKey key = new ChunkKey(chunk.getWorld().getUID(), chunk.getX(), chunk.getZ());
+        Set<Location> set = tubesByChunk.get(key);
+        if (set == null) return List.of();
+        return List.copyOf(set);
+    }
 
     // Normalize a location to block coordinates only
     private Location norm(Location loc) {
@@ -48,7 +81,20 @@ public class TubeNetworkManager {
         TubeNode node = new TubeNode(loc);
         tubes.put(loc, node);
 
+        indexAdd(loc);
+
         rebuildNeighbors(loc);
+
+        if (visualManager != null) {
+            try {
+                visualManager.updateTubeAndNeighbors(loc);
+            } catch (Exception ex) {
+                debug.log("addTube", "Exception updating tube visuals at " + loc + ": " + ex.getMessage());
+                ex.printStackTrace();
+            }
+        } else {
+            debug.log("addTube", "Tube visuals manager is null; tube will be particles-only until visuals init");
+        }
     }
 
     public void removeTube(Location loc) {
@@ -57,7 +103,17 @@ public class TubeNetworkManager {
         debug.log("removeTube", "Removing tube at " + loc);
 
         tubes.remove(loc);
+        indexRemove(loc);
         rebuildAll();
+
+        if (visualManager != null) {
+            try {
+                visualManager.updateTubeAndNeighbors(loc);
+            } catch (Exception ex) {
+                debug.log("removeTube", "Exception updating tube visuals at " + loc + ": " + ex.getMessage());
+                ex.printStackTrace();
+            }
+        }
     }
 
     public TubeNode getTube(Location loc) {
@@ -267,5 +323,20 @@ public class TubeNetworkManager {
         });
 
         debug.log("loadAll", "Finished loading tubes");
+    }
+
+    private void indexAdd(Location loc) {
+        var chunk = loc.getChunk();
+        ChunkKey key = new ChunkKey(chunk.getWorld().getUID(), chunk.getX(), chunk.getZ());
+        tubesByChunk.computeIfAbsent(key, k -> new HashSet<>()).add(loc);
+    }
+
+    private void indexRemove(Location loc) {
+        var chunk = loc.getChunk();
+        ChunkKey key = new ChunkKey(chunk.getWorld().getUID(), chunk.getX(), chunk.getZ());
+        Set<Location> set = tubesByChunk.get(key);
+        if (set == null) return;
+        set.remove(loc);
+        if (set.isEmpty()) tubesByChunk.remove(key);
     }
 }

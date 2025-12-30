@@ -1,0 +1,132 @@
+{
+  "model": {
+    "type": "minecraft:range_dispatch",
+    "property": "minecraft:custom_model_data",
+    "index": 0,
+    "entries": [
+      {
+        "threshold": 1001,
+        "model": {
+          "type": "minecraft:model",
+          "model": "minecraft:item/cloud_tube"
+        }
+      },
+      {
+        "threshold": 1004,
+        "model": {
+          "type": "minecraft:model",
+          "model": "minecraft:item/quarry_controller"
+        }
+      },
+      {
+        "threshold": 2001,
+        "model": {
+          "type": "minecraft:model",
+          "model": "minecraft:item/cloud_tube_center"
+        }
+      },
+      {
+        "threshold": 2002,
+        "model": {
+          "type": "minecraft:model",
+          "model": "minecraft:item/cloud_tube_arm_east"
+        }
+      },
+      {
+        "threshold": 2003,
+        "model": {
+          "type": "minecraft:model",
+          "model": "minecraft:item/cloud_tube_arm_west"
+        }
+      },
+      {
+        "threshold": 2004,
+        "model": {
+          "type": "minecraft:model",
+          "model": "minecraft:item/cloud_tube_arm_up"
+        }
+      },
+      {
+        "threshold": 2005,
+        "model": {
+          "type": "minecraft:model",
+          "model": "minecraft:item/cloud_tube_arm_down"
+        }
+      },
+      {
+        "threshold": 2006,
+        "model": {
+          "type": "minecraft:model",
+          "model": "minecraft:item/cloud_tube_arm_south"
+        }
+      },
+      {
+        "threshold": 2007,
+        "model": {
+          "type": "minecraft:model",
+          "model": "minecraft:item/cloud_tube_arm_north"
+        }
+      },
+      {
+        "threshold": 2008,
+        "model": {
+          "type": "minecraft:model",
+          "model": "minecraft:item/cloud_tube_center_connected"
+        }
+      },
+      {
+        "threshold": 2009,
+        "model": {
+          "type": "minecraft:model",
+          "model": "minecraft:item/cloud_tube_cap_east"
+        }
+      },
+      {
+        "threshold": 2010,
+        "model": {
+          "type": "minecraft:model",
+          "model": "minecraft:item/cloud_tube_cap_west"
+        }
+      },
+      {
+        "threshold": 2011,
+        "model": {
+          "type": "minecraft:model",
+          "model": "minecraft:item/cloud_tube_cap_up"
+        }
+      },
+      {
+        "threshold": 2012,
+        "model": {
+          "type": "minecraft:model",
+          "model": "minecraft:item/cloud_tube_cap_down"
+        }
+      },
+      {
+        "threshold": 2013,
+        "model": {
+          "type": "minecraft:model",
+          "model": "minecraft:item/cloud_tube_cap_south"
+        }
+      },
+      {
+        "threshold": 2014,
+        "model": {
+          "type": "minecraft:model",
+          "model": "minecraft:item/cloud_tube_cap_north"
+        }
+      },
+      {
+        "threshold": 2101,
+        "model": {
+          "type": "minecraft:model",
+          "model": "minecraft:item/quarry_controller_display"
+        }
+      }
+    ],
+    "fallback": {
+      "type": "minecraft:model",
+      "model": "minecraft:block/copper_block"
+    }
+  }
+}

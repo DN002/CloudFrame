@@ -13,6 +13,7 @@ public class CloudFrameCommand implements CommandExecutor {
 
     private final CloudFrameGiveCommand give = new CloudFrameGiveCommand();
     private final CloudFrameLogCommand log = new CloudFrameLogCommand();
+    private final CloudFrameModelCommand model = new CloudFrameModelCommand();
 
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
@@ -22,7 +23,8 @@ public class CloudFrameCommand implements CommandExecutor {
         if (args.length == 0) {
             debug.log("onCommand", "No subcommand provided");
             sender.sendMessage("§e/cloudframe give <item>");
-            sender.sendMessage("§e/cloudframe log [count|clear]");
+            sender.sendMessage("§e/cloudframe log [count|clear|tick]");
+            sender.sendMessage("§e/cloudframe model  §7(Inspect held item)");
             return true;
         }
 
@@ -37,6 +39,10 @@ public class CloudFrameCommand implements CommandExecutor {
 
             case "log" -> {
                 return log.onCommand(sender, cmd, label, args);
+            }
+
+            case "model" -> {
+                return model.onCommand(sender, cmd, label, args);
             }
 
             default -> {

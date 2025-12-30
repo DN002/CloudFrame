@@ -9,6 +9,8 @@ import dev.cloudframe.cloudframe.core.CloudFrameEngine;
 import dev.cloudframe.cloudframe.core.CloudFrameRegistry;
 import dev.cloudframe.cloudframe.listeners.ControllerGuiListener;
 import dev.cloudframe.cloudframe.listeners.ControllerListener;
+import dev.cloudframe.cloudframe.listeners.HoverHighlightTask;
+import dev.cloudframe.cloudframe.listeners.ProtocolHoverOutlineTask;
 import dev.cloudframe.cloudframe.listeners.MarkerListener;
 import dev.cloudframe.cloudframe.listeners.TubeListener;
 import dev.cloudframe.cloudframe.listeners.WrenchListener;
@@ -16,8 +18,11 @@ import dev.cloudframe.cloudframe.storage.Database;
 import dev.cloudframe.cloudframe.util.DebugFile;
 import dev.cloudframe.cloudframe.util.DebugManager;
 import dev.cloudframe.cloudframe.util.RecipeManager;
+import dev.cloudframe.cloudframe.listeners.ResourcePackHandler;
 
 public class CloudFrame extends JavaPlugin {
+
+    private ResourcePackHandler resourcePackHandler;
 
     @Override
     public void onEnable() {
@@ -47,6 +52,12 @@ public class CloudFrame extends JavaPlugin {
         CloudFrameRegistry.init(engine);
         CloudFrameRegistry.init(this); // Set plugin reference for scheduler
 
+        // Init tube visuals (BlockDisplays) after plugin reference is available
+        CloudFrameRegistry.tubes().initVisuals(this);
+
+        // Init controller visuals (entity-only)
+        CloudFrameRegistry.quarries().initVisuals(this);
+
         // Load saved data BEFORE ticking begins
         CloudFrameRegistry.tubes().loadAll();
         CloudFrameRegistry.quarries().loadAll();
@@ -61,8 +72,18 @@ public class CloudFrame extends JavaPlugin {
         // Start GUI update task
         ControllerGuiListener.startGuiUpdateTask();
 
+        // Start hover highlight task.
+        // Prefer ProtocolLib (glowing outline) when available; fall back to particles.
+        if (!ProtocolHoverOutlineTask.startIfAvailable(this)) {
+            HoverHighlightTask.start(this);
+        }
+
         // Register crafting recipes for plugin items
         RecipeManager.register(this);
+
+        // Initialize embedded resource pack handler (Option B)
+        resourcePackHandler = new ResourcePackHandler(this);
+        resourcePackHandler.init();
 
         // Register commands safely
         if (getCommand("cloudframe") != null) {
@@ -81,12 +102,23 @@ public class CloudFrame extends JavaPlugin {
         if (CloudFrameRegistry.engine() != null) {
             CloudFrameRegistry.engine().stop();
 
+            CloudFrameRegistry.tubes().shutdownVisuals();
+
+            CloudFrameRegistry.quarries().shutdownVisuals();
+
             CloudFrameRegistry.quarries().saveAll();
             CloudFrameRegistry.tubes().saveAll();
         }
 
+        // Shutdown resource pack handler
+        if (resourcePackHandler != null) {
+            resourcePackHandler.shutdown();
+        }
         // Stop GUI update task
         ControllerGuiListener.stopGuiUpdateTask();
+
+        ProtocolHoverOutlineTask.stop();
+        HoverHighlightTask.stop();
 
         // Close SQLite connection
         Database.close();

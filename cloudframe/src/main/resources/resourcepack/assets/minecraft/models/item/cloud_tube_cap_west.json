@@ -1,0 +1,15 @@
+{
+  "parent": "minecraft:block/block",
+  "textures": {
+    "cap": "minecraft:item/cloud_tube_arm_end"
+  },
+  "elements": [
+    {
+      "from": [0.0, 6, 6],
+      "to":   [0.1, 10, 10],
+      "faces": {
+        "west":  { "texture": "#cap", "cullface": "west" }
+      }
+    }
+  ]
+}

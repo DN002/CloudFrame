@@ -43,9 +43,17 @@ public class Database {
                     controllerX INTEGER,
                     controllerY INTEGER,
                     controllerZ INTEGER,
-                    active INTEGER DEFAULT 1
+                    active INTEGER DEFAULT 1,
+                    controllerYaw INTEGER DEFAULT 0
                 );
             """);
+
+            // Best-effort migration for older DBs.
+            try {
+                stmt.executeUpdate("ALTER TABLE quarries ADD COLUMN controllerYaw INTEGER DEFAULT 0");
+            } catch (SQLException ignored) {
+                // Column already exists (or table is new).
+            }
 
             // Tubes table
             stmt.executeUpdate("""
@@ -61,6 +69,18 @@ public class Database {
                     player TEXT NOT NULL,
                     ax INTEGER, ay INTEGER, az INTEGER,
                     bx INTEGER, by INTEGER, bz INTEGER
+                );
+            """);
+
+            // Unregistered controllers table (entity-only controllers placed but not finalized into a quarry)
+            stmt.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS unregistered_controllers (
+                    world TEXT NOT NULL,
+                    x INTEGER NOT NULL,
+                    y INTEGER NOT NULL,
+                    z INTEGER NOT NULL,
+                    yaw INTEGER DEFAULT 0,
+                    PRIMARY KEY (world, x, y, z)
                 );
             """);
         }

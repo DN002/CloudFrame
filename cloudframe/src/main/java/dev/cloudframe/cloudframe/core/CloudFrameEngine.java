@@ -56,10 +56,12 @@ public class CloudFrameEngine {
             // Tick item packets
             CloudFrameRegistry.packets().tick(shouldLog);
 
-            // Tube particle visualization (always runs, no logging)
-            for (TubeNode node : CloudFrameRegistry.tubes().all()) {
-                Location loc = node.getLocation().clone().add(0.5, 0.5, 0.5);
-                loc.getWorld().spawnParticle(Particle.END_ROD, loc, 1, 0, 0, 0, 0);
+            // Tube particle visualization (debug only)
+            if (DebugFlags.TUBE_PARTICLES) {
+                for (TubeNode node : CloudFrameRegistry.tubes().all()) {
+                    Location loc = node.getLocation().clone().add(0.5, 0.5, 0.5);
+                    loc.getWorld().spawnParticle(Particle.END_ROD, loc, 1, 0, 0, 0, 0);
+                }
             }
 
         } catch (Exception ex) {

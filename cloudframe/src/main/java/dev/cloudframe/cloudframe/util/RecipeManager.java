@@ -17,6 +17,12 @@ import dev.cloudframe.cloudframe.items.QuarryControllerBlock;
 public class RecipeManager {
 
     public static void register(CloudFrame plugin) {
+        // Clear any existing recipes with these keys
+        plugin.getServer().removeRecipe(new NamespacedKey(plugin, "cloud_marker"));
+        plugin.getServer().removeRecipe(new NamespacedKey(plugin, "cloud_wrench"));
+        plugin.getServer().removeRecipe(new NamespacedKey(plugin, "cloud_tube"));
+        plugin.getServer().removeRecipe(new NamespacedKey(plugin, "quarry_controller_item"));
+
         // Marker Tool: shape
         ItemStack marker = MarkerTool.create();
         NamespacedKey keyMarker = new NamespacedKey(plugin, "cloud_marker");

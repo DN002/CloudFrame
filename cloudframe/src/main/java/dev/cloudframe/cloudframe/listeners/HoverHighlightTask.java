@@ -17,8 +17,8 @@ public final class HoverHighlightTask {
 
     private static BukkitTask task;
 
-    private static final double MAX_DISTANCE = 5.0;
-    private static final long PERIOD_TICKS = 5L;
+    private static final double MAX_DISTANCE = 6.0;
+    private static final long PERIOD_TICKS = 2L;
 
     private static final DustOptions OUTLINE_DUST = new DustOptions(Color.fromRGB(255, 255, 255), 0.45f);
 

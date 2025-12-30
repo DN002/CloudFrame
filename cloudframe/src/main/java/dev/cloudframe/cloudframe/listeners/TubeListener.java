@@ -2,7 +2,11 @@ package dev.cloudframe.cloudframe.listeners;
 
 import org.bukkit.Location;
 import org.bukkit.GameMode;
+import org.bukkit.Material;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.block.data.Directional;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Interaction;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockDamageEvent;
@@ -16,6 +20,7 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.ItemStack;
 
 import dev.cloudframe.cloudframe.core.CloudFrameRegistry;
 import dev.cloudframe.cloudframe.util.CustomBlocks;
@@ -25,6 +30,15 @@ import dev.cloudframe.cloudframe.util.DebugManager;
 public class TubeListener implements Listener {
 
     private static final Debug debug = DebugManager.get(TubeListener.class);
+
+    private static final Vector[] DIRS = {
+        new Vector(1, 0, 0),
+        new Vector(-1, 0, 0),
+        new Vector(0, 1, 0),
+        new Vector(0, -1, 0),
+        new Vector(0, 0, 1),
+        new Vector(0, 0, -1)
+    };
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPlaceOnTube(PlayerInteractEntityEvent e) {
@@ -76,6 +90,75 @@ public class TubeListener implements Listener {
 
         pulseTube(targetLoc);
         e.getPlayer().sendMessage("§bTube placed.");
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onPlaceInventoryOnTube(PlayerInteractEntityEvent e) {
+        if (e.getHand() != EquipmentSlot.HAND) return;
+        if (CloudFrameRegistry.tubes().visualsManager() == null) return;
+
+        ItemStack handItem = e.getPlayer().getInventory().getItemInMainHand();
+        if (handItem == null || handItem.getType().isAir()) return;
+
+        // Tube placement is handled elsewhere.
+        if (CustomBlocks.isTubeItem(handItem)) return;
+
+        Material held = handItem.getType();
+        // Only handle inventory blocks (so this doesn't become a weird "place any block via tube click" mechanic).
+        if (held != Material.CHEST && held != Material.TRAPPED_CHEST && held != Material.BARREL) return;
+
+        var tubeLoc = CloudFrameRegistry.tubes().visualsManager().getTaggedTubeLocation(
+            e.getRightClicked().getPersistentDataContainer()
+        );
+        if (tubeLoc == null) return;
+
+        Location targetLoc = computeTargetFromEntityClick(e.getPlayer(), e.getRightClicked(), tubeLoc);
+        if (targetLoc == null) return;
+
+        if (!targetLoc.getChunk().isLoaded()) return;
+        Block target = targetLoc.getBlock();
+        if (!target.getType().isAir()) return;
+
+        // Don't allow placing an inventory block "inside" a controller.
+        if (CloudFrameRegistry.quarries().hasControllerAt(targetLoc)) {
+            e.getPlayer().sendMessage("§cYou can't place a chest inside a Quarry Controller.");
+            return;
+        }
+
+        // This click was on an entity, so vanilla won't place the block for us.
+        e.setCancelled(true);
+
+        target.setType(held, true);
+
+        // Best-effort facing like vanilla placement.
+        BlockData data = target.getBlockData();
+        if (data instanceof Directional directional) {
+            BlockFace facing = e.getPlayer().getFacing().getOppositeFace();
+            if (directional.getFaces().contains(facing)) {
+                directional.setFacing(facing);
+                target.setBlockData(directional, true);
+            }
+        }
+
+        if (e.getPlayer().getGameMode() != GameMode.CREATIVE) {
+            int amt = handItem.getAmount();
+            if (amt <= 1) {
+                e.getPlayer().getInventory().setItemInMainHand(null);
+            } else {
+                handItem.setAmount(amt - 1);
+                e.getPlayer().getInventory().setItemInMainHand(handItem);
+            }
+        }
+
+        // Refresh any adjacent tubes so connections appear immediately.
+        if (CloudFrameRegistry.tubes().visualsManager() != null) {
+            for (Vector v : DIRS) {
+                Location adj = targetLoc.clone().add(v);
+                if (CloudFrameRegistry.tubes().getTube(adj) != null) {
+                    CloudFrameRegistry.tubes().visualsManager().updateTubeAndNeighbors(adj);
+                }
+            }
+        }
     }
 
     private static Location computeTargetFromEntityClick(org.bukkit.entity.Player player, org.bukkit.entity.Entity clicked, Location baseTubeLoc) {
@@ -213,6 +296,100 @@ public class TubeListener implements Listener {
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onPlaceInventoryOnTubeBlock(PlayerInteractEvent e) {
+        if (e.getAction() != Action.RIGHT_CLICK_BLOCK) return;
+        if (e.getHand() != EquipmentSlot.HAND) return;
+        if (CloudFrameRegistry.tubes() == null) return;
+
+        var clicked = e.getClickedBlock();
+        if (clicked == null) return;
+
+        Location baseTubeLoc = clicked.getLocation();
+        if (CloudFrameRegistry.tubes().getTube(baseTubeLoc) == null) return;
+
+        ItemStack handItem = e.getPlayer().getInventory().getItemInMainHand();
+        if (handItem == null || handItem.getType().isAir()) return;
+
+        // Let tube placement handler deal with tube items.
+        if (CustomBlocks.isTubeItem(handItem)) return;
+
+        Material held = handItem.getType();
+        if (held != Material.CHEST && held != Material.TRAPPED_CHEST && held != Material.BARREL) return;
+
+        Block target = clicked.getRelative(e.getBlockFace());
+        if (!target.getType().isAir()) return;
+
+        Location targetLoc = target.getLocation();
+        if (CloudFrameRegistry.quarries().hasControllerAt(targetLoc)) {
+            e.getPlayer().sendMessage("§cYou can't place a chest inside a Quarry Controller.");
+            return;
+        }
+
+        // Vanilla won't place here because this block is actually air server-side.
+        e.setCancelled(true);
+
+        target.setType(held, true);
+
+        // Best-effort facing.
+        BlockData data = target.getBlockData();
+        if (data instanceof Directional directional) {
+            BlockFace facing = e.getPlayer().getFacing().getOppositeFace();
+            if (directional.getFaces().contains(facing)) {
+                directional.setFacing(facing);
+                target.setBlockData(directional, true);
+            }
+        }
+
+        if (e.getPlayer().getGameMode() != GameMode.CREATIVE) {
+            int amt = handItem.getAmount();
+            if (amt <= 1) {
+                e.getPlayer().getInventory().setItemInMainHand(null);
+            } else {
+                handItem.setAmount(amt - 1);
+                e.getPlayer().getInventory().setItemInMainHand(handItem);
+            }
+        }
+
+        // Refresh nearby tubes immediately.
+        if (CloudFrameRegistry.tubes().visualsManager() != null) {
+            for (Vector v : DIRS) {
+                Location adj = targetLoc.clone().add(v);
+                if (CloudFrameRegistry.tubes().getTube(adj) != null) {
+                    CloudFrameRegistry.tubes().visualsManager().updateTubeAndNeighbors(adj);
+                }
+            }
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onLeftClickTubeBlock(PlayerInteractEvent e) {
+        if (e.getAction() != Action.LEFT_CLICK_BLOCK) return;
+        if (e.getHand() != EquipmentSlot.HAND) return;
+        if (CloudFrameRegistry.tubes().visualsManager() == null) return;
+
+        var clicked = e.getClickedBlock();
+        if (clicked == null) return;
+
+        // Only handle selection-box clicks (server-side this should be air).
+        if (!clicked.getType().isAir()) return;
+
+        Location tubeLoc = clicked.getLocation();
+        if (CloudFrameRegistry.tubes().getTube(tubeLoc) == null) return;
+
+        // Prevent normal block interaction (this is air server-side anyway).
+        e.setCancelled(true);
+
+        debug.log("onLeftClickTubeBlock", "Player " + e.getPlayer().getName() + " removed tube at " + tubeLoc);
+        CloudFrameRegistry.tubes().removeTube(tubeLoc);
+
+        if (e.getPlayer().getGameMode() != GameMode.CREATIVE) {
+            tubeLoc.getWorld().dropItemNaturally(tubeLoc, CustomBlocks.tubeDrop());
+        }
+
+        e.getPlayer().sendMessage("§cTube removed.");
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onDamageTubeEntity(EntityDamageByEntityEvent e) {
         if (!(e.getDamager() instanceof org.bukkit.entity.Player player)) return;
         if (CloudFrameRegistry.tubes().visualsManager() == null) return;
@@ -248,6 +425,9 @@ public class TubeListener implements Listener {
         if (CloudFrameRegistry.tubes().visualsManager() == null) return;
         Location tubeLoc = raytraceTubeLocation(e.getPlayer(), e.getBlock().getLocation());
         if (tubeLoc == null) return;
+
+        // If there is a real block at the tube location (shouldn't happen), let the player damage it.
+        if (sameBlockCoords(e.getBlock().getLocation(), tubeLoc) && !e.getBlock().getType().isAir()) return;
         e.setCancelled(true);
     }
 
@@ -256,6 +436,9 @@ public class TubeListener implements Listener {
         if (CloudFrameRegistry.tubes().visualsManager() == null) return;
         Location tubeLoc = raytraceTubeLocation(e.getPlayer(), e.getBlock().getLocation());
         if (tubeLoc == null) return;
+
+        // If there is a real block at the tube location (shouldn't happen), let the player break it.
+        if (sameBlockCoords(e.getBlock().getLocation(), tubeLoc) && !e.getBlock().getType().isAir()) return;
 
         // Cancel breaking the block behind; break the tube instead.
         e.setCancelled(true);
@@ -270,6 +453,13 @@ public class TubeListener implements Listener {
         }
 
         e.getPlayer().sendMessage("§cTube removed.");
+    }
+
+    private static boolean sameBlockCoords(Location a, Location b) {
+        if (a == null || b == null) return false;
+        if (a.getWorld() == null || b.getWorld() == null) return false;
+        if (!a.getWorld().equals(b.getWorld())) return false;
+        return a.getBlockX() == b.getBlockX() && a.getBlockY() == b.getBlockY() && a.getBlockZ() == b.getBlockZ();
     }
 
     private Location raytraceTubeLocation(org.bukkit.entity.Player player, Location breakingBlockLoc) {

@@ -15,6 +15,7 @@ import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Interaction;
+import org.bukkit.entity.ItemDisplay;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -132,9 +133,9 @@ public final class ProtocolHoverOutlineTask {
 
     private static boolean isHighlightableEntity(Entity e) {
         if (e == null) return false;
-        // Only highlight the Interaction hitbox so the glow outline resembles the
-        // vanilla block selection wireframe.
-        if (!(e instanceof Interaction)) return false;
+        // Interaction is invisible (glow won't show), ItemDisplay is visible.
+        // We support both, but we will prefer glowing visible displays.
+        if (!(e instanceof Interaction) && !(e instanceof ItemDisplay)) return false;
         PersistentDataContainer pdc = e.getPersistentDataContainer();
 
         if (CloudFrameRegistry.tubes().visualsManager() != null && CloudFrameRegistry.tubes().visualsManager().getTaggedTubeLocation(pdc) != null) {
@@ -152,7 +153,7 @@ public final class ProtocolHoverOutlineTask {
 
         Location center = baseBlockLoc.clone().add(0.5, 0.5, 0.5);
         for (Entity e : baseBlockLoc.getWorld().getNearbyEntities(center, 1.25, 1.25, 1.25)) {
-            if (!(e instanceof Interaction)) continue;
+            if (!(e instanceof Interaction) && !(e instanceof ItemDisplay)) continue;
             PersistentDataContainer pdc = e.getPersistentDataContainer();
 
             Location t = null;

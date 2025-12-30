@@ -17,7 +17,8 @@ import dev.cloudframe.cloudframe.util.DebugManager;
 public class WrenchListener implements Listener {
 
     private static final Debug debug = DebugManager.get(WrenchListener.class);
-    private static final int QUARRY_SIZE = 9;
+    private static final int MIN_QUARRY_SIZE = 3;
+    private static final int MAX_QUARRY_SIZE = 128;
 
     @EventHandler
     public void onInteract(PlayerInteractEvent e) {
@@ -62,10 +63,11 @@ public class WrenchListener implements Listener {
         debug.log("onInteract", "Expanded vertical region: " + region);
 
         // Validate size
-        if (region.width() != QUARRY_SIZE || region.length() != QUARRY_SIZE) {
+        if (!isValidQuarrySize(region)) {
             debug.log("onInteract", "Invalid quarry size: width=" + region.width() +
                     " length=" + region.length());
-            p.sendMessage("§cQuarry must be exactly " + QUARRY_SIZE + "x" + QUARRY_SIZE + ".");
+            p.sendMessage("§cQuarry must be square between " + MIN_QUARRY_SIZE + "x" + MIN_QUARRY_SIZE +
+                " and " + MAX_QUARRY_SIZE + "x" + MAX_QUARRY_SIZE + " (got " + region.width() + "x" + region.length() + ").");
             return;
         }
 
@@ -207,7 +209,7 @@ public class WrenchListener implements Listener {
 
     /**
      * Try to infer a quarry region by locating glass frame blocks near the controller.
-     * Returns a Region if a valid frame (QUARRY_SIZE x QUARRY_SIZE) is found, otherwise null.
+        * Returns a Region if a valid frame (MIN..MAX square) is found, otherwise null.
      */
     private Region inferRegionFromBorder(Location controllerLoc) {
         var world = controllerLoc.getWorld();
@@ -219,7 +221,7 @@ public class WrenchListener implements Listener {
         // than the glass frame plane. Search a small vertical band for a valid frame.
         int[] yCandidates = new int[] { baseY, baseY - 1, baseY + 1, baseY - 2, baseY + 2 };
 
-        int range = QUARRY_SIZE + 6;
+        int range = MAX_QUARRY_SIZE + 10;
         int cx = controllerLoc.getBlockX();
         int cz = controllerLoc.getBlockZ();
 
@@ -291,8 +293,14 @@ public class WrenchListener implements Listener {
                 " size=" + width + "x" + length + " glassCount=" + glassCount
             );
 
-            // The outer glass frame is QUARRY_SIZE + 2 on each axis.
-            if (width != QUARRY_SIZE + 2 || length != QUARRY_SIZE + 2) {
+            // The outer glass frame is (innerSize + 2) on each axis.
+            // Accept any square inner size in [MIN..MAX].
+            if (width != length) {
+                continue;
+            }
+
+            int innerSize = width - 2;
+            if (innerSize < MIN_QUARRY_SIZE || innerSize > MAX_QUARRY_SIZE) {
                 continue;
             }
 
@@ -365,10 +373,11 @@ public class WrenchListener implements Listener {
         debug.log("finalizeQuarryAt", "Expanded vertical region: " + region);
 
         // Validate size
-        if (region.width() != QUARRY_SIZE || region.length() != QUARRY_SIZE) {
-                debug.log("finalizeQuarryAt", "Invalid quarry size: width=" + region.width() +
-                    " length=" + region.length());
-            p.sendMessage("§cQuarry must be exactly " + QUARRY_SIZE + "x" + QUARRY_SIZE + " (got " + region.width() + "x" + region.length() + ").");
+        if (!isValidQuarrySize(region)) {
+            debug.log("finalizeQuarryAt", "Invalid quarry size: width=" + region.width() +
+                " length=" + region.length());
+            p.sendMessage("§cQuarry must be square between " + MIN_QUARRY_SIZE + "x" + MIN_QUARRY_SIZE +
+                " and " + MAX_QUARRY_SIZE + "x" + MAX_QUARRY_SIZE + " (got " + region.width() + "x" + region.length() + ").");
             return;
         }
 
@@ -453,5 +462,16 @@ public class WrenchListener implements Listener {
         if (CloudFrameRegistry.quarries().visualsManager() != null) {
             CloudFrameRegistry.quarries().visualsManager().ensureController(controllerLoc, controllerYaw);
         }
+    }
+
+    private static boolean isValidQuarrySize(Region region) {
+        if (region == null) return false;
+
+        int w = region.width();
+        int l = region.length();
+
+        if (w != l) return false;
+        if (w < MIN_QUARRY_SIZE || w > MAX_QUARRY_SIZE) return false;
+        return true;
     }
 }

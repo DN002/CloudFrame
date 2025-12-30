@@ -31,7 +31,7 @@ public class ItemPacketManager {
     public void add(ItemPacket packet) {
         packets.add(packet);
         debug.log("add", "Added packet for item=" + packet.getItem().getType() +
-                " pathLength=" + packet.getPath().size());
+                " pathLength=" + packet.getPathLength());
     }
 
     public void tick(boolean shouldLog) {
@@ -72,8 +72,39 @@ public class ItemPacketManager {
     }
 
     private void deliver(ItemPacket p, boolean shouldLog) {
-        TubeNode destNode = p.getDestination();
-        Location loc = destNode.getLocation();
+        Location destInvLoc = p.getDestinationInventory();
+
+        // If we know the destination inventory block, deliver directly there.
+        if (destInvLoc != null && destInvLoc.getWorld() != null) {
+            if (shouldLog) {
+                debug.log("deliver", "Delivering item=" + p.getItem().getType() + " into inventory at " + destInvLoc);
+            }
+
+            if (!destInvLoc.getWorld().isChunkLoaded(destInvLoc.getBlockX() >> 4, destInvLoc.getBlockZ() >> 4)) {
+                if (shouldLog) debug.log("deliver", "Chunk not loaded — dropping item safely near " + destInvLoc);
+                destInvLoc.getWorld().dropItemNaturally(destInvLoc.clone().add(0.5, 1, 0.5), p.getItem());
+                return;
+            }
+
+            var holder = InventoryUtil.getInventory(destInvLoc.getBlock());
+            if (holder != null) {
+                var leftovers = holder.getInventory().addItem(p.getItem());
+                // If full, drop leftovers.
+                if (!leftovers.isEmpty()) {
+                    for (var stack : leftovers.values()) {
+                        destInvLoc.getWorld().dropItemNaturally(destInvLoc.clone().add(0.5, 1, 0.5), stack);
+                    }
+                }
+                return;
+            }
+
+            // Inventory missing; drop.
+            destInvLoc.getWorld().dropItemNaturally(destInvLoc.clone().add(0.5, 1, 0.5), p.getItem());
+            return;
+        }
+
+        // Fallback: treat last waypoint as a tube location and insert into any adjacent inventory.
+        Location loc = p.getLastWaypoint();
 
         if (shouldLog) {
             debug.log("deliver", "Delivering item=" + p.getItem().getType() +

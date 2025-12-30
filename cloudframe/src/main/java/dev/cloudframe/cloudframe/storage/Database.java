@@ -55,6 +55,19 @@ public class Database {
                 // Column already exists (or table is new).
             }
 
+            // Best-effort migrations for quarry augments.
+            try {
+                stmt.executeUpdate("ALTER TABLE quarries ADD COLUMN silkTouch INTEGER DEFAULT 0");
+            } catch (SQLException ignored) {
+                // Column already exists (or table is new).
+            }
+
+            try {
+                stmt.executeUpdate("ALTER TABLE quarries ADD COLUMN speedLevel INTEGER DEFAULT 0");
+            } catch (SQLException ignored) {
+                // Column already exists (or table is new).
+            }
+
             // Tubes table
             stmt.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS tubes (

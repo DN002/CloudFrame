@@ -10,6 +10,8 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
 import dev.cloudframe.cloudframe.quarry.Quarry;
+import dev.cloudframe.cloudframe.items.SilkTouchAugment;
+import dev.cloudframe.cloudframe.items.SpeedAugment;
 
 public class QuarryGUI {
 
@@ -107,6 +109,18 @@ public class QuarryGUI {
         refresh.setItemMeta(rfMeta);
         inv.setItem(10, refresh);
 
+        // --- POWER PANEL (placeholder for upcoming power network) ---
+        ItemStack power = new ItemStack(Material.REDSTONE);
+        ItemMeta pwMeta = power.getItemMeta();
+        pwMeta.setDisplayName("§6§lPower");
+        pwMeta.setLore(java.util.List.of(
+            "§7Stored: §f0 CFU",
+            "§7Usage: §f0 CFU/t",
+            "§8Power network not yet implemented"
+        ));
+        power.setItemMeta(pwMeta);
+        inv.setItem(11, power);
+
         // --- REMOVE QUARRY BUTTON ---
         ItemStack remove = new ItemStack(Material.BARRIER);
         ItemMeta rMeta = remove.getItemMeta();
@@ -114,6 +128,40 @@ public class QuarryGUI {
         remove.setItemMeta(rMeta);
         inv.setItem(13, remove);
 
+        // --- AUGMENTS ---
+        ItemStack silk = SilkTouchAugment.create();
+        ItemMeta silkMeta = silk.getItemMeta();
+        silkMeta.setLore(java.util.List.of(
+            q.hasSilkTouchAugment() ? "§aInstalled" : "§cNot installed",
+            "§7Install: §fRight-click controller",
+            "§7         §fwith augment in hand",
+            "§7Remove: §fClick this slot",
+            "§7        §fReturns to inventory"
+        ));
+        silk.setItemMeta(silkMeta);
+        inv.setItem(15, silk);
+
+        int speedTier = Math.max(0, q.getSpeedAugmentLevel());
+        ItemStack speed = SpeedAugment.create(Math.max(1, speedTier == 0 ? 1 : speedTier));
+        ItemMeta speedMeta = speed.getItemMeta();
+        speedMeta.setLore(java.util.List.of(
+            q.getSpeedAugmentLevel() > 0 ? ("§aInstalled (" + toRoman(q.getSpeedAugmentLevel()) + ")") : "§cNot installed",
+            "§7Install: §fRight-click controller",
+            "§7         §fwith augment in hand",
+            "§7Remove: §fClick this slot",
+            "§7        §fReturns to inventory"
+        ));
+        speed.setItemMeta(speedMeta);
+        inv.setItem(16, speed);
+
         return inv;
+    }
+
+    private static String toRoman(int tier) {
+        return switch (tier) {
+            case 2 -> "II";
+            case 3 -> "III";
+            default -> "I";
+        };
     }
 }

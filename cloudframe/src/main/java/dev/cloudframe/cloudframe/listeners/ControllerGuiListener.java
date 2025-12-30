@@ -14,6 +14,8 @@ import org.bukkit.scheduler.BukkitTask;
 import dev.cloudframe.cloudframe.gui.QuarryGUI;
 import dev.cloudframe.cloudframe.gui.QuarryHolder;
 import dev.cloudframe.cloudframe.quarry.Quarry;
+import dev.cloudframe.cloudframe.items.SilkTouchAugment;
+import dev.cloudframe.cloudframe.items.SpeedAugment;
 import dev.cloudframe.cloudframe.util.Debug;
 import dev.cloudframe.cloudframe.util.DebugManager;
 
@@ -117,6 +119,17 @@ public class ControllerGuiListener implements Listener {
         String name = clicked.getItemMeta().getDisplayName();
         debug.log("onInventoryClick", "Clicked item name=" + name);
 
+        // --- Augment slots ---
+        int rawSlot = e.getRawSlot();
+        if (rawSlot == 15) {
+            handleSilkAugmentClick(e, p, q);
+            return;
+        }
+        if (rawSlot == 16) {
+            handleSpeedAugmentClick(e, p, q);
+            return;
+        }
+
         // --- Pause Quarry ---
         if (name.contains("Pause")) {
             q.setActive(false);
@@ -127,6 +140,10 @@ public class ControllerGuiListener implements Listener {
 
         // --- Resume Quarry ---
         if (name.contains("Resume")) {
+            if (!q.hasValidOutput()) {
+                p.sendMessage("§cNo valid output: connect tubes to a chest (inventory) before starting.");
+                return;
+            }
             q.setActive(true);
             p.sendMessage("§aQuarry resumed.");
             // GUI will update automatically via update task
@@ -170,6 +187,60 @@ public class ControllerGuiListener implements Listener {
 
             p.closeInventory();
             return;
+        }
+    }
+
+    private static void handleSilkAugmentClick(InventoryClickEvent e, Player p, Quarry q) {
+        // Remove (click to remove)
+        if (q.hasSilkTouchAugment()) {
+            q.setSilkTouchAugment(false);
+            giveOrDrop(p, SilkTouchAugment.create());
+            p.sendMessage("§eSilk Touch augment removed.");
+            return;
+        }
+
+        // Install via controller right-click (not via GUI)
+        p.sendMessage("§7To install: right-click the controller with a Silk Touch Augment in hand.");
+    }
+
+    private static void handleSpeedAugmentClick(InventoryClickEvent e, Player p, Quarry q) {
+        int installed = q.getSpeedAugmentLevel();
+
+        // Remove (click to remove)
+        if (installed > 0) {
+            q.setSpeedAugmentLevel(0);
+            giveOrDrop(p, SpeedAugment.create(installed));
+            p.sendMessage("§eSpeed augment removed (" + roman(installed) + ").");
+            return;
+        }
+
+        // Install via controller right-click (not via GUI)
+        p.sendMessage("§7To install: right-click the controller with a Speed Augment in hand.");
+    }
+
+    private static void giveOrDrop(Player p, ItemStack item) {
+        if (p == null || item == null || item.getType().isAir()) return;
+        var leftover = p.getInventory().addItem(item);
+        leftover.values().forEach(it -> p.getWorld().dropItemNaturally(p.getLocation(), it));
+    }
+
+    private static String roman(int tier) {
+        return switch (tier) {
+            case 2 -> "II";
+            case 3 -> "III";
+            default -> "I";
+        };
+    }
+
+    private static void consumeCursorOne(InventoryClickEvent e) {
+        ItemStack cursor = e.getCursor();
+        if (cursor == null || cursor.getType().isAir()) return;
+        int amt = cursor.getAmount();
+        if (amt <= 1) {
+            e.setCursor(null);
+        } else {
+            cursor.setAmount(amt - 1);
+            e.setCursor(cursor);
         }
     }
 

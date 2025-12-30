@@ -10,10 +10,14 @@ import dev.cloudframe.cloudframe.core.CloudFrameRegistry;
 import dev.cloudframe.cloudframe.listeners.ControllerGuiListener;
 import dev.cloudframe.cloudframe.listeners.ControllerListener;
 import dev.cloudframe.cloudframe.listeners.HoverHighlightTask;
+import dev.cloudframe.cloudframe.listeners.ItemPacketListener;
 import dev.cloudframe.cloudframe.listeners.ProtocolHoverOutlineTask;
 import dev.cloudframe.cloudframe.listeners.MarkerListener;
 import dev.cloudframe.cloudframe.listeners.TubeListener;
 import dev.cloudframe.cloudframe.listeners.WrenchListener;
+import dev.cloudframe.cloudframe.listeners.InventoryTubeRefreshListener;
+import dev.cloudframe.cloudframe.listeners.ClientSelectionBoxTask;
+import dev.cloudframe.cloudframe.listeners.OccupiedBlockSpaceListener;
 import dev.cloudframe.cloudframe.storage.Database;
 import dev.cloudframe.cloudframe.util.DebugFile;
 import dev.cloudframe.cloudframe.util.DebugManager;
@@ -68,15 +72,17 @@ public class CloudFrame extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new WrenchListener(), this);
         getServer().getPluginManager().registerEvents(new ControllerListener(), this);
         getServer().getPluginManager().registerEvents(new ControllerGuiListener(), this);
+        getServer().getPluginManager().registerEvents(new ItemPacketListener(), this);
+        getServer().getPluginManager().registerEvents(new InventoryTubeRefreshListener(), this);
+        getServer().getPluginManager().registerEvents(new OccupiedBlockSpaceListener(), this);
 
         // Start GUI update task
         ControllerGuiListener.startGuiUpdateTask();
 
         // Start hover highlight task.
-        // Prefer ProtocolLib (glowing outline) when available; fall back to particles.
-        if (!ProtocolHoverOutlineTask.startIfAvailable(this)) {
-            HoverHighlightTask.start(this);
-        }
+        // Vanilla-style selection box for entity-only blocks (tubes/controllers).
+        // This avoids particles/glow and matches the normal Minecraft block outline.
+        ClientSelectionBoxTask.start(this);
 
         // Register crafting recipes for plugin items
         RecipeManager.register(this);
@@ -117,8 +123,7 @@ public class CloudFrame extends JavaPlugin {
         // Stop GUI update task
         ControllerGuiListener.stopGuiUpdateTask();
 
-        ProtocolHoverOutlineTask.stop();
-        HoverHighlightTask.stop();
+        ClientSelectionBoxTask.stop();
 
         // Close SQLite connection
         Database.close();

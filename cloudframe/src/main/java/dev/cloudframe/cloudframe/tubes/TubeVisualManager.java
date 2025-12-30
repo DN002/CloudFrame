@@ -27,6 +27,7 @@ import org.joml.AxisAngle4f;
 import org.joml.Vector3f;
 
 import dev.cloudframe.cloudframe.core.CloudFrameRegistry;
+import dev.cloudframe.cloudframe.util.InventoryUtil;
 import dev.cloudframe.cloudframe.util.Debug;
 import dev.cloudframe.cloudframe.util.DebugManager;
 
@@ -280,7 +281,8 @@ public final class TubeVisualManager {
     private boolean isConnectable(Location neighborLoc) {
         neighborLoc = norm(neighborLoc);
         if (tubeManager.getTube(neighborLoc) != null) return true;
-        return CloudFrameRegistry.quarries().hasControllerAt(neighborLoc);
+        if (CloudFrameRegistry.quarries().hasControllerAt(neighborLoc)) return true;
+        return InventoryUtil.isInventory(neighborLoc.getBlock());
     }
 
     private void ensureOrRemove(Location tubeLoc, Part part, boolean shouldExist) {

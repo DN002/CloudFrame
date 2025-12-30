@@ -149,8 +149,8 @@ public class QuarryManager {
 
             var ps = conn.prepareStatement("""
                 INSERT INTO quarries
-                (owner, world, ax, ay, az, bx, by, bz, controllerX, controllerY, controllerZ, active, controllerYaw)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (owner, world, ax, ay, az, bx, by, bz, controllerX, controllerY, controllerZ, active, controllerYaw, silkTouch, speedLevel)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """);
 
             for (Quarry q : quarries) {
@@ -178,6 +178,9 @@ public class QuarryManager {
                 ps.setInt(12, q.isActive() ? 1 : 0);
 
                 ps.setInt(13, q.getControllerYaw());
+
+                ps.setInt(14, q.hasSilkTouchAugment() ? 1 : 0);
+                ps.setInt(15, q.getSpeedAugmentLevel());
 
                 ps.addBatch();
             }
@@ -247,6 +250,20 @@ public class QuarryManager {
                     // Older DBs won't have this column.
                 }
 
+                boolean silkTouch = false;
+                try {
+                    silkTouch = rs.getInt("silkTouch") == 1;
+                } catch (java.sql.SQLException ignored) {
+                    // Older DBs won't have this column.
+                }
+
+                int speedLevel = 0;
+                try {
+                    speedLevel = rs.getInt("speedLevel");
+                } catch (java.sql.SQLException ignored) {
+                    // Older DBs won't have this column.
+                }
+
                 // Rebuild region (normalized + cached)
                 Region region = new Region(a, b);
 
@@ -260,6 +277,9 @@ public class QuarryManager {
                 );
 
                 Quarry q = new Quarry(owner, a, b, region, controller, controllerYaw);
+
+                q.setSilkTouchAugment(silkTouch);
+                q.setSpeedAugmentLevel(speedLevel);
 
                 boolean active = rs.getInt("active") == 1;
                 q.setActive(active);

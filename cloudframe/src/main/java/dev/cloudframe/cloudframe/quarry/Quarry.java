@@ -2,8 +2,14 @@ package dev.cloudframe.cloudframe.quarry;
 
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.Particle;
+import org.bukkit.Sound;
+import org.bukkit.SoundGroup;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.entity.Player;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.util.Vector;
 
@@ -55,6 +61,14 @@ public class Quarry {
     private boolean isScanning = false;
 
     private final List<ItemStack> outputBuffer = new ArrayList<>();
+
+    // Mining pacing/FX
+    private static final int BASE_MINE_TICKS_PER_BLOCK = 12; // slower default mining speed
+    private float mineProgress = 0.0f; // 0..1 crack progress for current block
+
+    // Future: hook this up to an augment system.
+    private boolean silkTouchAugment = false;
+    private int speedAugmentLevel = 0; // 0..3
 
     public Quarry(UUID owner, Location posA, Location posB, Region region, Location controller, int controllerYaw) {
         this.owner = owner;
@@ -155,6 +169,22 @@ public class Quarry {
         return owner;
     }
 
+    public boolean hasSilkTouchAugment() {
+        return silkTouchAugment;
+    }
+
+    public void setSilkTouchAugment(boolean enabled) {
+        this.silkTouchAugment = enabled;
+    }
+
+    public int getSpeedAugmentLevel() {
+        return speedAugmentLevel;
+    }
+
+    public void setSpeedAugmentLevel(int level) {
+        this.speedAugmentLevel = Math.max(0, Math.min(3, level));
+    }
+
     public Region getRegion() {
         return region;
     }
@@ -198,6 +228,13 @@ public class Quarry {
         if (!isChunkLoaded()) return;
         if (!active) return;
 
+        // Do not run without a valid output (reachable inventory via tubes).
+        if (!hasValidOutput()) {
+            debug.log("tick", "No valid output for quarry controller=" + controller + " — pausing");
+            setActive(false);
+            return;
+        }
+
         World world = region.getWorld();
 
         Material typeAtPos = world.getBlockAt(currentX, currentY, currentZ).getType();
@@ -223,15 +260,55 @@ public class Quarry {
         if (isMineable(type)) {
             if (shouldLog) {
                 debug.log("tick", "Mining block " + type +
-                        " at (" + currentX + "," + currentY + "," + currentZ + ")");
+                        " at (" + currentX + "," + currentY + "," + currentZ + ") progress=" + mineProgress);
             }
 
-            // Only add to output buffer if it's not a fluid
-            if (type != Material.WATER && type != Material.LAVA) {
-                outputBuffer.add(new ItemStack(type));
+            mineProgress = Math.min(1.0f, mineProgress + (1.0f / (float) getMineTicksPerBlock()));
+            sendBlockCrack(block.getLocation(), mineProgress);
+
+            if (mineProgress >= 1.0f) {
+                // Only add to output buffer if it's not a fluid.
+                // Use vanilla drops as-if mined with a pickaxe (stone->cobble, deepslate->cobbled, ores, etc.).
+                if (type != Material.WATER && type != Material.LAVA) {
+                    ItemStack tool = createMiningTool(silkTouchAugment);
+                    try {
+                        for (ItemStack drop : block.getDrops(tool)) {
+                            if (drop == null || drop.getType() == Material.AIR) continue;
+                            outputBuffer.add(drop);
+                        }
+                    } catch (Throwable ignored) {
+                        // Fallback: preserve previous behavior if the drops API changes.
+                        outputBuffer.add(new ItemStack(type));
+                    }
+                }
+
+                playBreakSound(block);
+
+                // Material-accurate break particles (dirt looks like dirt, stone like stone, etc.)
+                try {
+                    block.getWorld().spawnParticle(
+                        Particle.BLOCK,
+                        block.getLocation().clone().add(0.5, 0.5, 0.5),
+                        18,
+                        0.25, 0.25, 0.25,
+                        block.getBlockData()
+                    );
+                } catch (Throwable ignored) {
+                    // Best-effort; safe to skip if API changes.
+                }
+
+                block.setType(Material.AIR);
+                blocksMined++;
+
+                // Reset crack animation
+                sendBlockCrack(block.getLocation(), 0.0f);
+                mineProgress = 0.0f;
             }
-            block.setType(Material.AIR);
-            blocksMined++;
+        } else {
+            if (mineProgress > 0.0f) {
+                sendBlockCrack(block.getLocation(), 0.0f);
+                mineProgress = 0.0f;
+            }
         }
 
         if (!outputBuffer.isEmpty()) {
@@ -239,7 +316,40 @@ public class Quarry {
             trySendToTube(shouldLog);
         }
 
-        advancePosition(shouldLog);
+        // Only advance when we didn't start/continue mining this tick.
+        // If a block was mined, mineProgress has been reset to 0.
+        if (!isMineable(type) || mineProgress == 0.0f) {
+            advancePosition(shouldLog);
+        }
+    }
+
+    private void sendBlockCrack(Location loc, float progress01) {
+        if (loc == null || loc.getWorld() == null) return;
+        float p = Math.max(0.0f, Math.min(1.0f, progress01));
+
+        for (Player player : loc.getWorld().getPlayers()) {
+            if (player.getLocation().distanceSquared(loc) > (32.0 * 32.0)) continue;
+            try {
+                player.sendBlockDamage(loc, p);
+            } catch (Throwable ignored) {
+                // Non-fatal if API changes.
+            }
+        }
+    }
+
+    private void playBreakSound(Block block) {
+        if (block == null) return;
+        Location loc = block.getLocation();
+        if (loc.getWorld() == null) return;
+
+        try {
+            BlockData data = block.getBlockData();
+            SoundGroup group = data.getSoundGroup();
+            Sound sound = group.getBreakSound();
+            loc.getWorld().playSound(loc.clone().add(0.5, 0.5, 0.5), sound, group.getVolume(), group.getPitch());
+        } catch (Throwable ignored) {
+            loc.getWorld().playSound(loc.clone().add(0.5, 0.5, 0.5), Sound.BLOCK_STONE_BREAK, 1.0f, 1.0f);
+        }
     }
 
     private boolean isMineable(Material type) {
@@ -248,6 +358,31 @@ public class Quarry {
         if (type.isSolid()) return true;
         if (type == Material.WATER || type == Material.LAVA) return true;
         return false;
+    }
+
+    private static ItemStack createMiningTool(boolean silkTouch) {
+        // Diamond pick is a reasonable default for "quarry acts like a pickaxe" behavior.
+        ItemStack tool = new ItemStack(Material.DIAMOND_PICKAXE);
+        if (silkTouch) {
+            try {
+                tool.addUnsafeEnchantment(Enchantment.SILK_TOUCH, 1);
+            } catch (Throwable ignored) {
+                // Best-effort.
+            }
+        }
+        return tool;
+    }
+
+    private int getMineTicksPerBlock() {
+        // Speed augment tiers: gradual increase.
+        // Match common pickaxe feel on stone (no enchants/effects):
+        // Tier I ~ iron, Tier II ~ diamond, Tier III ~ netherite.
+        return switch (speedAugmentLevel) {
+            case 1 -> 8;
+            case 2 -> 6;
+            case 3 -> 5;
+            default -> BASE_MINE_TICKS_PER_BLOCK;
+        };
     }
 
     private void advancePosition(boolean shouldLog) {
@@ -290,9 +425,11 @@ public class Quarry {
 
         // Route to the first inventory we can reach.
         for (Location invLoc : inventories) {
+            // Find the tube that touches this inventory.
             TubeNode destTube = null;
-            for (TubeNode node : CloudFrameRegistry.tubes().all()) {
-                if (node.getLocation().distance(invLoc) < 1.5) {
+            for (Vector v : DIRS) {
+                TubeNode node = CloudFrameRegistry.tubes().getTube(invLoc.clone().add(v));
+                if (node != null) {
                     destTube = node;
                     break;
                 }
@@ -303,9 +440,91 @@ public class Quarry {
             if (path == null) continue;
 
             ItemStack item = outputBuffer.remove(0);
-            CloudFrameRegistry.packets().add(new ItemPacket(item, path));
+
+            // Add endpoints so the packet is visible in the short segments:
+            // controller -> first tube ... last tube -> inventory.
+            java.util.List<Location> points = new java.util.ArrayList<>();
+
+            Location controllerCenter = controller.clone().add(0.5, 0.5, 0.5);
+            Location invCenter = invLoc.clone().add(0.5, 0.5, 0.5);
+
+            Location firstTubeCenter = path.get(0).getLocation().clone().add(0.5, 0.5, 0.5);
+            Location lastTubeCenter = path.get(path.size() - 1).getLocation().clone().add(0.5, 0.5, 0.5);
+
+            // Compute the face directions (should be cardinal/axis-aligned).
+            Vector dirControllerToTube = new Vector(
+                clamp(path.get(0).getLocation().getBlockX() - controller.getBlockX()),
+                clamp(path.get(0).getLocation().getBlockY() - controller.getBlockY()),
+                clamp(path.get(0).getLocation().getBlockZ() - controller.getBlockZ())
+            );
+
+            Vector dirTubeToInv = new Vector(
+                clamp(invLoc.getBlockX() - path.get(path.size() - 1).getLocation().getBlockX()),
+                clamp(invLoc.getBlockY() - path.get(path.size() - 1).getLocation().getBlockY()),
+                clamp(invLoc.getBlockZ() - path.get(path.size() - 1).getLocation().getBlockZ())
+            );
+
+            // Face points (half-block offset toward the connection).
+            Location controllerFace = controllerCenter.clone().add(dirControllerToTube.clone().multiply(0.5));
+            Location firstTubeFace = firstTubeCenter.clone().add(dirControllerToTube.clone().multiply(-0.5));
+            Location lastTubeFace = lastTubeCenter.clone().add(dirTubeToInv.clone().multiply(0.5));
+            Location invFace = invCenter.clone().add(dirTubeToInv.clone().multiply(-0.5));
+
+            // Start inside controller then exit via its face.
+            points.add(controllerCenter);
+            points.add(controllerFace);
+            points.add(firstTubeFace);
+
+            // Tube centers along the path.
+            for (TubeNode node : path) {
+                points.add(node.getLocation().clone().add(0.5, 0.5, 0.5));
+            }
+
+            // Enter inventory via face; no need to travel to center.
+            points.add(lastTubeFace);
+            points.add(invFace);
+
+            CloudFrameRegistry.packets().add(new ItemPacket(item, points, invLoc));
             return;
         }
+    }
+
+    /**
+     * Returns true when the controller is connected to the tube network AND that network reaches
+     * at least one inventory (e.g., chest). Used to gate quarry running.
+     */
+    public boolean hasValidOutput() {
+        if (controller == null || controller.getWorld() == null) return false;
+        if (CloudFrameRegistry.tubes() == null) return false;
+
+        final Vector[] DIRS = new Vector[] {
+            new Vector(1, 0, 0),
+            new Vector(-1, 0, 0),
+            new Vector(0, 1, 0),
+            new Vector(0, -1, 0),
+            new Vector(0, 0, 1),
+            new Vector(0, 0, -1)
+        };
+
+        TubeNode startTube = null;
+        for (Vector v : DIRS) {
+            TubeNode node = CloudFrameRegistry.tubes().getTube(controller.clone().add(v));
+            if (node != null) {
+                startTube = node;
+                break;
+            }
+        }
+
+        if (startTube == null) return false;
+
+        List<Location> inventories = CloudFrameRegistry.tubes().findInventoriesNear(startTube);
+        return inventories != null && !inventories.isEmpty();
+    }
+
+    private static int clamp(int v) {
+        if (v > 0) return 1;
+        if (v < 0) return -1;
+        return 0;
     }
 
     public double getProgressPercent() {

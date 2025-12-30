@@ -1,12 +1,18 @@
 package dev.cloudframe.cloudframe.tubes;
 
 import org.bukkit.Location;
-import org.bukkit.Particle;
 import org.bukkit.World;
-import org.bukkit.entity.ArmorStand;
+import org.bukkit.entity.Display;
+import org.bukkit.entity.EntityType;
+import org.bukkit.entity.ItemDisplay;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.util.Transformation;
 
+import org.joml.Vector3f;
+
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import dev.cloudframe.cloudframe.util.Debug;
 import dev.cloudframe.cloudframe.util.DebugManager;
@@ -16,42 +22,86 @@ public class ItemPacket {
     private static final Debug debug = DebugManager.get(ItemPacket.class);
 
     private final ItemStack item;
-    private final List<TubeNode> path;
+    private final List<Location> waypoints;
+    private final Location destinationInventory; // nullable
 
     private int currentIndex = 0;
     private double progress = 0.0;
 
     private static final double SPEED = 0.2;
 
-    private ArmorStand entity; // floating item entity
+    private ItemDisplay entity; // visual packet entity
 
     public ItemPacket(ItemStack item, List<TubeNode> path) {
+        this(item, toWaypoints(path), null);
+    }
+
+    public ItemPacket(ItemStack item, List<Location> waypoints, Location destinationInventory) {
         this.item = item;
-        this.path = path;
+        this.waypoints = List.copyOf(waypoints);
+        this.destinationInventory = destinationInventory;
+
+        if (this.waypoints.size() < 2) {
+            throw new IllegalArgumentException("ItemPacket requires at least 2 waypoints");
+        }
 
         debug.log("constructor", "Created packet for item=" + item.getType() +
-                " pathLength=" + path.size());
+                " pathLength=" + this.waypoints.size());
 
         spawnEntity();
     }
 
+    private static List<Location> toWaypoints(List<TubeNode> path) {
+        Objects.requireNonNull(path, "path");
+        if (path.size() < 1) {
+            throw new IllegalArgumentException("Tube path must not be empty");
+        }
+
+        List<Location> points = new ArrayList<>(path.size());
+        for (TubeNode node : path) {
+            Location loc = node.getLocation();
+            if (loc == null || loc.getWorld() == null) continue;
+            points.add(loc.clone().add(0.5, 0.5, 0.5));
+        }
+        if (points.size() < 2) {
+            // If there's only one tube, duplicate to create a valid segment.
+            Location only = points.isEmpty() ? path.get(0).getLocation().clone().add(0.5, 0.5, 0.5) : points.get(0);
+            points.add(only.clone());
+        }
+        return points;
+    }
+
     private void spawnEntity() {
-        Location start = path.get(0).getLocation().clone().add(0.5, 0.1, 0.5);
+        Location start = waypoints.get(0).clone();
         World world = start.getWorld();
 
         debug.log("spawnEntity", "Spawning packet entity at " + start);
 
-        ArmorStand stand = world.spawn(start, ArmorStand.class, s -> {
-            s.setInvisible(true);
-            s.setMarker(true);        // no hitbox
-            s.setGravity(false);
-            s.setSmall(true);
-            s.setInvulnerable(true);
-            s.setSilent(true);
-            s.setPersistent(false);
-        });
+        ItemDisplay display = (ItemDisplay) world.spawnEntity(start, EntityType.ITEM_DISPLAY);
+        display.setItemStack(item.clone());
 
-        this.entity = stand;
+        // Make it feel "in-tube": smaller + centered.
+        display.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.FIXED);
+        display.setTransformation(new Transformation(
+            new Vector3f(0f, 0f, 0f),
+            new org.joml.Quaternionf(),
+            new Vector3f(0.35f, 0.35f, 0.35f),
+            new org.joml.Quaternionf()
+        ));
+
+        display.setGravity(false);
+        display.setInvulnerable(true);
+        display.setPersistent(false);
+
+        // Smooth movement between teleports.
+        display.setInterpolationDelay(0);
+        display.setInterpolationDuration(2);
+        display.setTeleportDuration(1);
+
+        // Keep it rendered even if the player is close.
+        display.setBillboard(Display.Billboard.FIXED);
+
+        this.entity = display;
     }
 
     public boolean tick(boolean shouldLog) {
@@ -71,10 +121,9 @@ public class ItemPacket {
         }
 
         // Check next chunk before moving
-        if (currentIndex < path.size() - 1) {
-            TubeNode next = path.get(currentIndex + 1);
-            Location nextLoc = next.getLocation();
-            if (!nextLoc.getWorld().isChunkLoaded(nextLoc.getBlockX() >> 4, nextLoc.getBlockZ() >> 4)) {
+        if (currentIndex < waypoints.size() - 1) {
+            Location nextLoc = waypoints.get(currentIndex + 1);
+            if (nextLoc.getWorld() != null && !nextLoc.getWorld().isChunkLoaded(nextLoc.getBlockX() >> 4, nextLoc.getBlockZ() >> 4)) {
                 if (shouldLog) {
                     debug.log("tick", "Next chunk unloaded — pausing packet");
                 }
@@ -82,7 +131,7 @@ public class ItemPacket {
             }
         }
 
-        if (currentIndex >= path.size() - 1) {
+        if (currentIndex >= waypoints.size() - 1) {
             if (shouldLog) {
                 debug.log("tick", "Reached final node — finishing packet");
             }
@@ -104,11 +153,8 @@ public class ItemPacket {
     }
 
     private void moveEntity(boolean shouldLog) {
-        TubeNode from = path.get(currentIndex);
-        TubeNode to = path.get(Math.min(currentIndex + 1, path.size() - 1));
-
-        Location a = from.getLocation().clone().add(0.5, 0.1, 0.5);
-        Location b = to.getLocation().clone().add(0.5, 0.1, 0.5);
+        Location a = waypoints.get(currentIndex);
+        Location b = waypoints.get(Math.min(currentIndex + 1, waypoints.size() - 1));
 
         double x = a.getX() + (b.getX() - a.getX()) * progress;
         double y = a.getY() + (b.getY() - a.getY()) * progress;
@@ -117,14 +163,6 @@ public class ItemPacket {
         Location newLoc = new Location(a.getWorld(), x, y, z);
 
         entity.teleport(newLoc);
-
-        newLoc.getWorld().spawnParticle(
-            Particle.SOUL_FIRE_FLAME,
-            newLoc,
-            1,
-            0.02, 0.02, 0.02,
-            0
-        );
 
         if (shouldLog) {
             debug.log("moveEntity", "Packet moved to " + newLoc +
@@ -145,12 +183,20 @@ public class ItemPacket {
         return item;
     }
 
-    public TubeNode getDestination() {
-        return path.get(path.size() - 1);
+    public Location getDestinationInventory() {
+        return destinationInventory;
     }
 
-    public List<TubeNode> getPath() {
-        return path;
+    public Location getLastWaypoint() {
+        return waypoints.get(waypoints.size() - 1);
+    }
+
+    public int getPathLength() {
+        return waypoints.size();
+    }
+
+    public List<Location> getWaypoints() {
+        return waypoints;
     }
 
     public double getProgress() {

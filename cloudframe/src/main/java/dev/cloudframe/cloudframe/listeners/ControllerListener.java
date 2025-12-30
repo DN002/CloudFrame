@@ -2,6 +2,11 @@ package dev.cloudframe.cloudframe.listeners;
 
 import org.bukkit.Location;
 import org.bukkit.GameMode;
+import org.bukkit.Material;
+import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.block.data.Directional;
 import org.bukkit.entity.Interaction;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -13,12 +18,15 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
 import dev.cloudframe.cloudframe.core.CloudFrameRegistry;
 import dev.cloudframe.cloudframe.gui.QuarryGUI;
 import dev.cloudframe.cloudframe.quarry.Quarry;
+import dev.cloudframe.cloudframe.items.SilkTouchAugment;
+import dev.cloudframe.cloudframe.items.SpeedAugment;
 import dev.cloudframe.cloudframe.util.CustomBlocks;
 import dev.cloudframe.cloudframe.util.Debug;
 import dev.cloudframe.cloudframe.util.DebugManager;
@@ -203,8 +211,113 @@ public class ControllerListener implements Listener {
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onInteractBlock(PlayerInteractEvent e) {
+        if (e.getAction() != Action.RIGHT_CLICK_BLOCK) return;
+        if (e.getHand() != EquipmentSlot.HAND) return;
+
+        var clicked = e.getClickedBlock();
+        if (clicked == null) return;
+
+        Location loc = clicked.getLocation();
+        if (!CloudFrameRegistry.quarries().hasControllerAt(loc)) return;
+
+        debug.log("onInteractBlock", "Player " + e.getPlayer().getName() + " interacted with controller block at " + loc);
+
+        // Sneak-right-click with a normal block: place it against the controller like a regular block.
+        // This prevents the GUI from opening when the player is just trying to build.
+        if (e.getPlayer().isSneaking()) {
+            ItemStack handItem = e.getPlayer().getInventory().getItemInMainHand();
+            if (handItem != null && !handItem.getType().isAir()) {
+                Material held = handItem.getType();
+                boolean isPluginItem = CustomBlocks.isControllerItem(handItem) || CustomBlocks.isTubeItem(handItem);
+
+                if (!isPluginItem && held.isBlock()) {
+                    Block target = clicked.getRelative(e.getBlockFace());
+                    if (!target.getType().isAir()) {
+                        // Behave like vanilla: if occupied, do nothing.
+                        e.setCancelled(true);
+                        return;
+                    }
+
+                    e.setCancelled(true);
+                    target.setType(held, true);
+
+                    // Best-effort: set facing for directional blocks.
+                    BlockData data = target.getBlockData();
+                    if (data instanceof Directional directional) {
+                        BlockFace facing = e.getPlayer().getFacing().getOppositeFace();
+                        if (directional.getFaces().contains(facing)) {
+                            directional.setFacing(facing);
+                            target.setBlockData(directional, true);
+                        }
+                    }
+
+                    if (e.getPlayer().getGameMode() != GameMode.CREATIVE) {
+                        int amt = handItem.getAmount();
+                        if (amt <= 1) {
+                            e.getPlayer().getInventory().setItemInMainHand(null);
+                        } else {
+                            handItem.setAmount(amt - 1);
+                            e.getPlayer().getInventory().setItemInMainHand(handItem);
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+
+        e.setCancelled(true);
+
+        Quarry q = CloudFrameRegistry.quarries().getByController(loc);
+        if (q == null) {
+            e.getPlayer().sendMessage("§eController not finalized. Use a §6Wrench§e on it to finalize.");
+            return;
+        }
+
+        // Augment install: right-click controller with augment in hand.
+        var hand = e.getPlayer().getInventory().getItemInMainHand();
+        if (SilkTouchAugment.isItem(hand)) {
+            if (q.hasSilkTouchAugment()) {
+                e.getPlayer().sendMessage("§eSilk Touch augment already installed.");
+                return;
+            }
+
+            q.setSilkTouchAugment(true);
+            consumeHandOne(e.getPlayer());
+            e.getPlayer().sendMessage("§aSilk Touch augment installed.");
+            return;
+        }
+
+        if (SpeedAugment.isItem(hand)) {
+            int newTier = SpeedAugment.getTier(hand);
+            if (newTier <= 0) newTier = 1;
+
+            int installed = q.getSpeedAugmentLevel();
+            if (installed == newTier) {
+                e.getPlayer().sendMessage("§eSpeed augment " + roman(newTier) + " already installed.");
+                return;
+            }
+
+            // Return previous tier (if any).
+            if (installed > 0) {
+                var leftover = e.getPlayer().getInventory().addItem(SpeedAugment.create(installed));
+                leftover.values().forEach(it -> e.getPlayer().getWorld().dropItemNaturally(e.getPlayer().getLocation(), it));
+            }
+
+            q.setSpeedAugmentLevel(newTier);
+            consumeHandOne(e.getPlayer());
+            e.getPlayer().sendMessage("§aSpeed augment installed (" + roman(newTier) + ").");
+            return;
+        }
+
+        e.getPlayer().openInventory(QuarryGUI.build(q));
+        ControllerGuiListener.trackGuiOpen(e.getPlayer(), q);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onInteractEntity(PlayerInteractEntityEvent e) {
         if (CloudFrameRegistry.quarries().visualsManager() == null) return;
+        if (e.getHand() != EquipmentSlot.HAND) return;
 
         Location loc = CloudFrameRegistry.quarries().visualsManager().getTaggedControllerLocation(
             e.getRightClicked().getPersistentDataContainer()
@@ -223,9 +336,129 @@ public class ControllerListener implements Listener {
             return;
         }
 
+        // Augment install: right-click controller with augment in hand.
+        var hand = e.getPlayer().getInventory().getItemInMainHand();
+        if (SilkTouchAugment.isItem(hand)) {
+            e.setCancelled(true);
+
+            if (q.hasSilkTouchAugment()) {
+                e.getPlayer().sendMessage("§eSilk Touch augment already installed.");
+                return;
+            }
+
+            q.setSilkTouchAugment(true);
+            consumeHandOne(e.getPlayer());
+            e.getPlayer().sendMessage("§aSilk Touch augment installed.");
+            return;
+        }
+
+        if (SpeedAugment.isItem(hand)) {
+            e.setCancelled(true);
+
+            int newTier = SpeedAugment.getTier(hand);
+            if (newTier <= 0) newTier = 1;
+
+            int installed = q.getSpeedAugmentLevel();
+            if (installed == newTier) {
+                e.getPlayer().sendMessage("§eSpeed augment " + roman(newTier) + " already installed.");
+                return;
+            }
+
+            // Return previous tier (if any).
+            if (installed > 0) {
+                var leftover = e.getPlayer().getInventory().addItem(SpeedAugment.create(installed));
+                leftover.values().forEach(it -> e.getPlayer().getWorld().dropItemNaturally(e.getPlayer().getLocation(), it));
+            }
+
+            q.setSpeedAugmentLevel(newTier);
+            consumeHandOne(e.getPlayer());
+            e.getPlayer().sendMessage("§aSpeed augment installed (" + roman(newTier) + ").");
+            return;
+        }
+
         e.getPlayer().openInventory(QuarryGUI.build(q));
         ControllerGuiListener.trackGuiOpen(e.getPlayer(), q);
         e.setCancelled(true);
+    }
+
+    private static void consumeHandOne(org.bukkit.entity.Player player) {
+        if (player == null) return;
+        if (player.getGameMode() == GameMode.CREATIVE) return;
+
+        var item = player.getInventory().getItemInMainHand();
+        if (item == null || item.getType().isAir()) return;
+
+        int amt = item.getAmount();
+        if (amt <= 1) {
+            player.getInventory().setItemInMainHand(null);
+        } else {
+            item.setAmount(amt - 1);
+            player.getInventory().setItemInMainHand(item);
+        }
+    }
+
+    private static String roman(int tier) {
+        return switch (tier) {
+            case 2 -> "II";
+            case 3 -> "III";
+            default -> "I";
+        };
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onLeftClickControllerBlock(PlayerInteractEvent e) {
+        if (e.getAction() != Action.LEFT_CLICK_BLOCK) return;
+        if (e.getHand() != EquipmentSlot.HAND) return;
+
+        var clicked = e.getClickedBlock();
+        if (clicked == null) return;
+
+        // Only handle selection-box clicks (server-side this should be air).
+        if (!clicked.getType().isAir()) return;
+
+        Location loc = clicked.getLocation();
+        if (!CloudFrameRegistry.quarries().hasControllerAt(loc)) return;
+
+        // Prevent normal block interaction (this is air server-side anyway).
+        e.setCancelled(true);
+
+        var player = e.getPlayer();
+
+        Quarry q = CloudFrameRegistry.quarries().getByController(loc);
+        if (q == null) {
+            if (!player.isSneaking()) {
+                player.sendMessage("§eNot finalized. Use a §6Wrench§e to finalize, or §cSneak + hit§e to pick it up.");
+                return;
+            }
+
+            CloudFrameRegistry.quarries().unmarkUnregisteredController(loc);
+
+            refreshAdjacentTubes(loc);
+            if (CloudFrameRegistry.quarries().visualsManager() != null) {
+                CloudFrameRegistry.quarries().visualsManager().removeController(loc);
+            }
+
+            if (player.getGameMode() != GameMode.CREATIVE) {
+                loc.getWorld().dropItemNaturally(loc, CustomBlocks.controllerDrop());
+            }
+
+            player.sendMessage("§cController picked up.");
+            return;
+        }
+
+        if (!player.isSneaking()) {
+            player.sendMessage("§cSneak + hit to remove the quarry.");
+            return;
+        }
+
+        CloudFrameRegistry.quarries().remove(q);
+        refreshAdjacentTubes(loc);
+
+        if (player.getGameMode() != GameMode.CREATIVE) {
+            loc.getWorld().dropItemNaturally(loc, CustomBlocks.controllerDrop());
+        }
+
+        player.sendMessage("§cQuarry removed.");
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)

@@ -7,6 +7,8 @@ import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.Directional;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
+import org.bukkit.block.data.Bisected;
+import org.bukkit.block.data.type.Bed;
 import org.bukkit.entity.Interaction;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockDamageEvent;
@@ -293,6 +295,139 @@ public class TubeListener implements Listener {
 
         pulseTube(loc);
         e.getPlayer().sendMessage("§bTube placed.");
+    }
+
+    /**
+     * When using the client-side selection box, the client clicks a fake block at the tube
+     * coordinate. Server-side that block is air, so vanilla placement won't work.
+     *
+     * This handler makes tubes behave like a normal placement anchor: right-clicking the tube
+     * outline with a regular block item places that block into the adjacent blockspace.
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onPlaceNormalBlockAgainstTube(PlayerInteractEvent e) {
+        if (e.getHand() != EquipmentSlot.HAND) return;
+
+        final Action action = e.getAction();
+        if (action != Action.RIGHT_CLICK_BLOCK && action != Action.RIGHT_CLICK_AIR) return;
+
+        ItemStack handItem = e.getPlayer().getInventory().getItemInMainHand();
+        if (handItem == null || handItem.getType().isAir()) return;
+
+        // Let our tube-placement handler handle tube items.
+        if (CustomBlocks.isTubeItem(handItem)) return;
+
+        // Don't interfere with controller item placement.
+        if (CustomBlocks.isControllerItem(handItem)) return;
+
+        Material held = handItem.getType();
+        if (!held.isBlock()) return;
+
+        // Let the dedicated inventory placement logic handle these.
+        if (held == Material.CHEST || held == Material.TRAPPED_CHEST || held == Material.BARREL) return;
+
+        // Avoid half-baked multi-block placement (doors, tall flowers, beds, etc.).
+        // These should be placed against a real vanilla block so vanilla can handle the second part.
+        try {
+            BlockData heldData = held.createBlockData();
+            if (heldData instanceof Bisected || heldData instanceof Bed) {
+                return;
+            }
+        } catch (Throwable ignored) {
+            // If block data creation fails for any reason, just don't special-case it.
+        }
+
+        Location baseTubeLoc = null;
+        BlockFace face = null;
+
+        if (action == Action.RIGHT_CLICK_BLOCK) {
+            Block clicked = e.getClickedBlock();
+            if (clicked == null) return;
+
+            // Only take over when the clicked block is actually air (selection-box scenario).
+            // If it's not air, let vanilla placement work normally.
+            if (!clicked.getType().isAir()) return;
+
+            Location maybeTubeLoc = clicked.getLocation();
+            if (CloudFrameRegistry.tubes().getTube(maybeTubeLoc) == null) return;
+
+            baseTubeLoc = maybeTubeLoc;
+            face = e.getBlockFace();
+        } else {
+            // RIGHT_CLICK_AIR fallback: raytrace for the tube entity the player is looking at.
+            baseTubeLoc = raytraceLookedTube(e.getPlayer());
+        }
+
+        if (baseTubeLoc == null || baseTubeLoc.getWorld() == null) return;
+        if (face == null) {
+            // Compute a face from look direction.
+            Location target = computeAdjacentFromLook(baseTubeLoc, e.getPlayer().getEyeLocation().getDirection());
+            if (target == null) return;
+            placeSimpleBlock(e, handItem, held, target);
+            return;
+        }
+
+        Location targetLoc = baseTubeLoc.clone().add(face.getModX(), face.getModY(), face.getModZ());
+        placeSimpleBlock(e, handItem, held, targetLoc);
+    }
+
+    private static void placeSimpleBlock(PlayerInteractEvent e, ItemStack handItem, Material held, Location targetLoc) {
+        if (targetLoc == null || targetLoc.getWorld() == null) return;
+
+        // Prevent placing into occupied entity-only blockspaces.
+        if (CloudFrameRegistry.tubes().getTube(targetLoc) != null) return;
+        if (CloudFrameRegistry.quarries().hasControllerAt(targetLoc)) return;
+
+        Block target = targetLoc.getBlock();
+        if (!target.getType().isAir()) return;
+
+        // We are handling this interaction; prevent other plugins from treating this as use-item.
+        e.setCancelled(true);
+
+        target.setType(held, true);
+
+        // Best-effort facing like vanilla placement.
+        try {
+            BlockData data = target.getBlockData();
+            if (data instanceof Directional directional) {
+                BlockFace facing = e.getPlayer().getFacing().getOppositeFace();
+                if (directional.getFaces().contains(facing)) {
+                    directional.setFacing(facing);
+                    target.setBlockData(directional, true);
+                }
+            }
+        } catch (Throwable ignored) {
+            // Best-effort.
+        }
+
+        if (e.getPlayer().getGameMode() != GameMode.CREATIVE) {
+            int amt = handItem.getAmount();
+            if (amt <= 1) {
+                e.getPlayer().getInventory().setItemInMainHand(null);
+            } else {
+                handItem.setAmount(amt - 1);
+                e.getPlayer().getInventory().setItemInMainHand(handItem);
+            }
+        }
+    }
+
+    private static Location raytraceLookedTube(org.bukkit.entity.Player player) {
+        if (player == null) return null;
+        if (CloudFrameRegistry.tubes().visualsManager() == null) return null;
+
+        RayTraceResult rr = player.getWorld().rayTraceEntities(
+            player.getEyeLocation(),
+            player.getEyeLocation().getDirection(),
+            6.0,
+            0.45,
+            ent -> (ent instanceof Interaction) && CloudFrameRegistry.tubes().visualsManager().getTaggedTubeLocation(ent.getPersistentDataContainer()) != null
+        );
+
+        if (rr == null || rr.getHitEntity() == null) return null;
+
+        return CloudFrameRegistry.tubes().visualsManager().getTaggedTubeLocation(
+            rr.getHitEntity().getPersistentDataContainer()
+        );
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)

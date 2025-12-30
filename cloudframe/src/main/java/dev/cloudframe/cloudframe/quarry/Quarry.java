@@ -21,6 +21,7 @@ import dev.cloudframe.cloudframe.util.Debug;
 import dev.cloudframe.cloudframe.util.DebugManager;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -61,6 +62,9 @@ public class Quarry {
     private boolean isScanning = false;
 
     private final List<ItemStack> outputBuffer = new ArrayList<>();
+
+    // Round-robin output across multiple reachable inventories.
+    private int outputInventoryCursor = 0;
 
     // Mining pacing/FX
     private static final int BASE_MINE_TICKS_PER_BLOCK = 12; // slower default mining speed
@@ -423,8 +427,25 @@ public class Quarry {
         List<Location> inventories = CloudFrameRegistry.tubes().findInventoriesNear(startTube);
         if (inventories.isEmpty()) return;
 
-        // Route to the first inventory we can reach.
-        for (Location invLoc : inventories) {
+        // Stable ordering so round-robin is predictable.
+        inventories = new java.util.ArrayList<>(inventories);
+        inventories.sort(
+            Comparator
+                .comparingInt(Location::getBlockX)
+                .thenComparingInt(Location::getBlockY)
+                .thenComparingInt(Location::getBlockZ)
+        );
+
+        int startIndex = 0;
+        if (!inventories.isEmpty()) {
+            startIndex = Math.floorMod(outputInventoryCursor, inventories.size());
+        }
+
+        // Route to inventories in round-robin order.
+        for (int attempt = 0; attempt < inventories.size(); attempt++) {
+            int idx = (startIndex + attempt) % inventories.size();
+            Location invLoc = inventories.get(idx);
+
             // Find the tube that touches this inventory.
             TubeNode destTube = null;
             for (Vector v : DIRS) {
@@ -485,6 +506,9 @@ public class Quarry {
             points.add(invFace);
 
             CloudFrameRegistry.packets().add(new ItemPacket(item, points, invLoc));
+
+            // Advance cursor to the next inventory after the one we just used.
+            outputInventoryCursor = idx + 1;
             return;
         }
     }

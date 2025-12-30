@@ -12,6 +12,7 @@ import org.bukkit.block.data.type.Bed;
 import org.bukkit.entity.Interaction;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockDamageEvent;
+import org.bukkit.FluidCollisionMode;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 import org.bukkit.event.block.Action;
@@ -415,19 +416,41 @@ public class TubeListener implements Listener {
         if (player == null) return null;
         if (CloudFrameRegistry.tubes().visualsManager() == null) return null;
 
+        Location eye = player.getEyeLocation();
+        Vector dir = eye.getDirection();
+
+        // Don't target through solid blocks; mimic vanilla LOS.
+        double limit = 6.0;
+        RayTraceResult br = player.getWorld().rayTraceBlocks(eye, dir, limit, FluidCollisionMode.NEVER, true);
+        if (br != null && br.getHitPosition() != null) {
+            limit = eye.toVector().distance(br.getHitPosition());
+            limit = Math.max(0.0, limit - 0.01);
+        }
+
+        // Primary: raytrace the Interaction entity.
         RayTraceResult rr = player.getWorld().rayTraceEntities(
-            player.getEyeLocation(),
-            player.getEyeLocation().getDirection(),
-            6.0,
+            eye,
+            dir,
+            limit,
             0.45,
             ent -> (ent instanceof Interaction) && CloudFrameRegistry.tubes().visualsManager().getTaggedTubeLocation(ent.getPersistentDataContainer()) != null
         );
 
-        if (rr == null || rr.getHitEntity() == null) return null;
+        if (rr != null && rr.getHitEntity() != null) {
+            return CloudFrameRegistry.tubes().visualsManager().getTaggedTubeLocation(
+                rr.getHitEntity().getPersistentDataContainer()
+            );
+        }
 
-        return CloudFrameRegistry.tubes().visualsManager().getTaggedTubeLocation(
-            rr.getHitEntity().getPersistentDataContainer()
-        );
+        // Fallback: scan blockspaces along the ray to find a tube location.
+        final double step = 0.15;
+        for (double d = 0.0; d <= limit; d += step) {
+            Location sample = eye.clone().add(dir.clone().multiply(d));
+            Location blockLoc = new Location(sample.getWorld(), sample.getBlockX(), sample.getBlockY(), sample.getBlockZ());
+            if (CloudFrameRegistry.tubes().getTube(blockLoc) != null) return blockLoc;
+        }
+
+        return null;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)

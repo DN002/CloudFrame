@@ -11,10 +11,12 @@ import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Interaction;
 import org.bukkit.entity.Player;
+import org.bukkit.FluidCollisionMode;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.RayTraceResult;
+import org.bukkit.util.Vector;
 
 import dev.cloudframe.cloudframe.core.CloudFrameRegistry;
 
@@ -150,30 +152,78 @@ public final class ClientSelectionBoxTask {
     }
 
     private static Location findTargetBase(Player player) {
+        Location eye = player.getEyeLocation();
+        Vector dir = eye.getDirection();
+
+        // Don't highlight through solid blocks; limit to first real block hit like vanilla.
+        double limit = MAX_DISTANCE;
+        RayTraceResult br = player.getWorld().rayTraceBlocks(eye, dir, MAX_DISTANCE, FluidCollisionMode.NEVER, true);
+        if (br != null && br.getHitPosition() != null) {
+            limit = eye.toVector().distance(br.getHitPosition());
+            limit = Math.max(0.0, limit - 0.01);
+        }
+
+        // Primary: raytrace tube/controller Interaction entities (cheap and accurate when it hits).
         RayTraceResult rr = player.getWorld().rayTraceEntities(
-            player.getEyeLocation(),
-            player.getEyeLocation().getDirection(),
-            MAX_DISTANCE,
+            eye,
+            dir,
+            limit,
             RAY_SIZE,
             ClientSelectionBoxTask::isHighlightableEntity
         );
 
-        if (rr == null || rr.getHitEntity() == null) return null;
+        if (rr != null && rr.getHitEntity() != null) {
+            Entity hit = rr.getHitEntity();
+            PersistentDataContainer pdc = hit.getPersistentDataContainer();
 
-        Entity hit = rr.getHitEntity();
-        PersistentDataContainer pdc = hit.getPersistentDataContainer();
+            Location tubeLoc = null;
+            if (CloudFrameRegistry.tubes().visualsManager() != null) {
+                tubeLoc = CloudFrameRegistry.tubes().visualsManager().getTaggedTubeLocation(pdc);
+            }
+            if (tubeLoc != null) return tubeLoc;
 
-        Location tubeLoc = null;
-        if (CloudFrameRegistry.tubes().visualsManager() != null) {
-            tubeLoc = CloudFrameRegistry.tubes().visualsManager().getTaggedTubeLocation(pdc);
+            Location controllerLoc = null;
+            if (CloudFrameRegistry.quarries().visualsManager() != null) {
+                controllerLoc = CloudFrameRegistry.quarries().visualsManager().getTaggedControllerLocation(pdc);
+            }
+            if (controllerLoc != null) return controllerLoc;
         }
-        if (tubeLoc != null) return tubeLoc;
 
-        Location controllerLoc = null;
-        if (CloudFrameRegistry.quarries().visualsManager() != null) {
-            controllerLoc = CloudFrameRegistry.quarries().visualsManager().getTaggedControllerLocation(pdc);
+        // Fallback: scan blockspaces along the player's crosshair ray to find the nearest
+        // entity-only "block" location (tube/controller). This avoids outline flicker when
+        // the Interaction entity raytrace misses at certain angles.
+        return scanVirtualBlockspacesAlongRay(eye, dir, limit);
+    }
+
+    private static Location scanVirtualBlockspacesAlongRay(Location eye, Vector dir, double limit) {
+        if (eye == null || eye.getWorld() == null || dir == null) return null;
+
+        final double step = 0.15; // small step keeps it responsive without being too expensive
+
+        Location sample = eye.clone();
+        for (double d = 0.0; d <= limit; d += step) {
+            sample.set(
+                eye.getX() + dir.getX() * d,
+                eye.getY() + dir.getY() * d,
+                eye.getZ() + dir.getZ() * d
+            );
+
+            Location blockLoc = new Location(
+                eye.getWorld(),
+                sample.getBlockX(),
+                sample.getBlockY(),
+                sample.getBlockZ()
+            );
+
+            if (CloudFrameRegistry.tubes().getTube(blockLoc) != null) {
+                return blockLoc;
+            }
+            if (CloudFrameRegistry.quarries().hasControllerAt(blockLoc)) {
+                return blockLoc;
+            }
         }
-        return controllerLoc;
+
+        return null;
     }
 
     private static boolean isHighlightableEntity(Entity e) {

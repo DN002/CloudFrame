@@ -137,10 +137,17 @@ public final class ControllerVisualManager {
     }
 
     private void ensureInteraction(Location controllerLoc) {
+        Location desired = controllerLoc.clone().add(0.5, 0.0, 0.5);
+
         UUID id = interactionByLoc.get(controllerLoc);
         if (id != null) {
             Entity existing = Bukkit.getEntity(id);
-            if (existing instanceof Interaction && !existing.isDead()) return;
+            if (existing instanceof Interaction interaction && !existing.isDead()) {
+                // Older versions spawned this at y+0.5; respawn at bottom-center so the
+                // hitbox reliably covers the entire blockspace.
+                if (interaction.getLocation().distanceSquared(desired) < 0.01) return;
+                existing.remove();
+            }
         }
 
         Interaction interaction = spawnInteraction(controllerLoc);
@@ -165,8 +172,10 @@ public final class ControllerVisualManager {
         World world = controllerLoc.getWorld();
         if (world == null) throw new IllegalStateException("Controller location has no world");
 
-        Location center = controllerLoc.clone().add(0.5, 0.5, 0.5);
-        Interaction interaction = (Interaction) world.spawnEntity(center, EntityType.INTERACTION);
+        // Interaction hitboxes are bottom-anchored; spawn at bottom-center so the 1x1x1
+        // hitbox covers the full blockspace.
+        Location base = controllerLoc.clone().add(0.5, 0.0, 0.5);
+        Interaction interaction = (Interaction) world.spawnEntity(base, EntityType.INTERACTION);
         interaction.setGravity(false);
         interaction.setInvulnerable(true);
         interaction.setPersistent(false);

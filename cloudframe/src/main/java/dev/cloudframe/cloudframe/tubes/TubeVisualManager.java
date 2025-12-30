@@ -342,11 +342,20 @@ public final class TubeVisualManager {
     }
 
     private void ensureInteraction(Location tubeLoc) {
+        Location desired = tubeLoc.clone().add(0.5, 0.0, 0.5);
+
         java.util.UUID id = interactionByTube.get(tubeLoc);
         if (id != null) {
             Entity existing = Bukkit.getEntity(id);
-            if (existing instanceof Interaction && !existing.isDead()) {
-                return;
+            if (existing instanceof Interaction interaction && !existing.isDead()) {
+                // If an older version spawned the hitbox centered vertically (y+0.5),
+                // the lower half of the block can miss raytraces. Respawn at the correct
+                // bottom-centered position.
+                if (interaction.getLocation().distanceSquared(desired) < 0.01) {
+                    return;
+                }
+
+                existing.remove();
             }
         }
 
@@ -358,8 +367,10 @@ public final class TubeVisualManager {
         World world = tubeLoc.getWorld();
         if (world == null) throw new IllegalStateException("Tube location has no world");
 
-        Location center = tubeLoc.clone().add(0.5, 0.5, 0.5);
-        Interaction interaction = (Interaction) world.spawnEntity(center, EntityType.INTERACTION);
+        // Interaction hitboxes are bottom-anchored; spawn at bottom-center so the 1x1x1
+        // hitbox covers the full blockspace.
+        Location base = tubeLoc.clone().add(0.5, 0.0, 0.5);
+        Interaction interaction = (Interaction) world.spawnEntity(base, EntityType.INTERACTION);
         interaction.setGravity(false);
         interaction.setInvulnerable(true);
         interaction.setPersistent(false);

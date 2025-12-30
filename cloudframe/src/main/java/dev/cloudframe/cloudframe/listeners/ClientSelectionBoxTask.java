@@ -34,7 +34,7 @@ public final class ClientSelectionBoxTask {
     private static final long PERIOD_TICKS = 1L;
 
     // Raytracing entities can briefly miss when aiming near edges; debounce clears to avoid flicker.
-    private static final int CLEAR_AFTER_MISSES = 3;
+    private static final int CLEAR_AFTER_MISSES = 8;
 
     private static final Map<UUID, HighlightState> stateByPlayer = new HashMap<>();
 

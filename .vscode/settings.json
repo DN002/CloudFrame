@@ -1,4 +1,9 @@
 {
     "java.compile.nullAnalysis.mode": "automatic",
-    "java.configuration.updateBuildConfiguration": "interactive"
+    "java.configuration.updateBuildConfiguration": "automatic",
+    "java.import.maven.enabled": true,
+    "java.configuration.maven.userSettings": null,
+    "files.exclude": {
+        "**/target": true
+    }
 }

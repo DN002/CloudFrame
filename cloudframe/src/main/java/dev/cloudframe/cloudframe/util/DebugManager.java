@@ -2,20 +2,25 @@ package dev.cloudframe.cloudframe.util;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.logging.*;
 
 import org.bukkit.plugin.java.JavaPlugin;
 
+/**
+ * Bukkit-specific debug manager initialization.
+ * 
+ * Wraps the common DebugManager and initializes DebugFile with the plugin folder.
+ */
 public class DebugManager {
 
     private static FileHandler handler;
     private static Logger logger;
-    private static final Map<Class<?>, Debug> debuggers = new HashMap<>();
 
     // Called from CloudFrame.onEnable()
     public static void init(JavaPlugin plugin) {
+        // Initialize common debug file with plugin data folder path
+        dev.cloudframe.common.util.DebugFile.init(plugin.getDataFolder().getAbsolutePath());
+
         try {
             File logFile = new File(plugin.getDataFolder(), "debug.log");
 
@@ -46,9 +51,13 @@ public class DebugManager {
             handler.flush();
             handler.close();
         }
+        dev.cloudframe.common.util.DebugManager.shutdown();
     }
 
+    /**
+     * Get a Debug instance for the given class (delegates to common).
+     */
     public static Debug get(Class<?> clazz) {
-        return debuggers.computeIfAbsent(clazz, c -> new Debug(c, logger));
+        return new Debug(clazz, logger);
     }
 }

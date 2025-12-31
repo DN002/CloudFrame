@@ -1,0 +1,18 @@
+name: CloudFrame
+version: 2.0.0
+description: Advanced quarry and tube networking for Minecraft
+authors:
+  - CloudFrame Team
+main: dev.cloudframe.bukkit.CloudFrameBukkit
+api-version: "1.21"
+
+commands:
+  cloudframe:
+    description: CloudFrame administration commands
+    usage: /cloudframe [help|status|reload]
+    permission: cloudframe.admin
+
+permissions:
+  cloudframe.admin:
+    description: Allows access to CloudFrame admin commands
+    default: op

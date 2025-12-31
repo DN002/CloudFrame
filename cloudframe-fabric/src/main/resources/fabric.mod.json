@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "cloudframe",
+  "version": "2.0.0",
+  "name": "CloudFrame",
+  "description": "Advanced quarry and tube networking for Minecraft",
+  "authors": [
+    "CloudFrame Team"
+  ],
+  "contact": {
+    "homepage": "https://github.com/DN002/CloudFrame",
+    "sources": "https://github.com/DN002/CloudFrame"
+  },
+  "license": "MIT",
+  "icon": "assets/cloudframe/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "dev.cloudframe.fabric.CloudFrameFabric"
+    ]
+  },
+  "mixins": [
+    "cloudframe.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.1"
+  }
+}

@@ -2,6 +2,9 @@
 **/target/
 **/build/
 
+# Maven Shade plugin output
+**/dependency-reduced-pom.xml
+
 # Gradle
 **/.gradle/
 

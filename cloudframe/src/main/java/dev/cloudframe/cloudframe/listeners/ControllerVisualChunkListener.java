@@ -8,6 +8,7 @@ import org.bukkit.event.world.ChunkUnloadEvent;
 
 import dev.cloudframe.cloudframe.quarry.QuarryManager;
 import dev.cloudframe.cloudframe.util.Debug;
+import dev.cloudframe.cloudframe.util.DebugFlags;
 import dev.cloudframe.cloudframe.util.DebugManager;
 
 public class ControllerVisualChunkListener implements Listener {
@@ -36,6 +37,8 @@ public class ControllerVisualChunkListener implements Listener {
             quarryManager.visualsManager().ensureController(loc, quarryManager.getControllerYaw(loc));
         }
 
-        debug.log("chunkLoad", "Refreshed controller entities for chunk " + chunk.getWorld().getName() + " " + chunk.getX() + "," + chunk.getZ());
+        if (DebugFlags.CHUNK_LOGGING) {
+            debug.log("chunkLoad", "Refreshed controller entities for chunk " + chunk.getWorld().getName() + " " + chunk.getX() + "," + chunk.getZ());
+        }
     }
 }

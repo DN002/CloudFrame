@@ -102,6 +102,19 @@ public class QuarryGUI {
         toggle.setItemMeta(tMeta);
         inv.setItem(7, toggle);
 
+        // --- OUTPUT ROUTING MODE ---
+        ItemStack routing = new ItemStack(Material.HOPPER);
+        ItemMeta rtMeta = routing.getItemMeta();
+        rtMeta.setDisplayName("§b§lOutput Routing");
+
+        boolean rr = q.isOutputRoundRobin();
+        rtMeta.setLore(java.util.List.of(
+            "§7Mode: " + (rr ? "§aRound Robin" : "§eFill First"),
+            "§7Click to toggle"
+        ));
+        routing.setItemMeta(rtMeta);
+        inv.setItem(8, routing);
+
         // --- REFRESH METADATA BUTTON ---
         ItemStack refresh = new ItemStack(Material.COMPARATOR);
         ItemMeta rfMeta = refresh.getItemMeta();

@@ -3,6 +3,8 @@ package dev.cloudframe.cloudframe.listeners;
 import org.bukkit.Location;
 import org.bukkit.GameMode;
 import org.bukkit.Material;
+import org.bukkit.Sound;
+import org.bukkit.SoundGroup;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.Directional;
 import org.bukkit.block.Block;
@@ -10,10 +12,12 @@ import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.Bisected;
 import org.bukkit.block.data.type.Bed;
 import org.bukkit.entity.Interaction;
+import org.bukkit.entity.Player;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockDamageEvent;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.util.RayTraceResult;
+import org.bukkit.util.BoundingBox;
 import org.bukkit.util.Vector;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.EventHandler;
@@ -385,7 +389,26 @@ public class TubeListener implements Listener {
         // We are handling this interaction; prevent other plugins from treating this as use-item.
         e.setCancelled(true);
 
+        // Match vanilla: don't place if a player is occupying the target blockspace.
+        if (isAnyPlayerOccupyingBlockspace(targetLoc)) {
+            return;
+        }
+
         target.setType(held, true);
+
+        // Play vanilla-like placement sound (since vanilla placement didn't run).
+        try {
+            SoundGroup group = target.getBlockData().getSoundGroup();
+            Sound sound = group.getPlaceSound();
+            targetLoc.getWorld().playSound(targetLoc.clone().add(0.5, 0.5, 0.5), sound, group.getVolume(), group.getPitch());
+        } catch (Throwable ignored) {
+            // Best-effort fallback.
+            try {
+                targetLoc.getWorld().playSound(targetLoc.clone().add(0.5, 0.5, 0.5), Sound.BLOCK_STONE_PLACE, 1.0f, 1.0f);
+            } catch (Throwable ignored2) {
+                // ignore
+            }
+        }
 
         // Best-effort facing like vanilla placement.
         try {
@@ -410,6 +433,26 @@ public class TubeListener implements Listener {
                 e.getPlayer().getInventory().setItemInMainHand(handItem);
             }
         }
+    }
+
+    private static boolean isAnyPlayerOccupyingBlockspace(Location loc) {
+        if (loc == null || loc.getWorld() == null) return false;
+
+        double x = loc.getBlockX();
+        double y = loc.getBlockY();
+        double z = loc.getBlockZ();
+
+        BoundingBox blockBox = new BoundingBox(x, y, z, x + 1.0, y + 1.0, z + 1.0);
+        for (Player p : loc.getWorld().getPlayers()) {
+            try {
+                if (p.getBoundingBox().overlaps(blockBox)) {
+                    return true;
+                }
+            } catch (Throwable ignored) {
+                // Best-effort.
+            }
+        }
+        return false;
     }
 
     private static Location raytraceLookedTube(org.bukkit.entity.Player player) {
@@ -540,6 +583,11 @@ public class TubeListener implements Listener {
         // Vanilla won't place here because this block is actually air server-side.
         e.setCancelled(true);
 
+        // Match vanilla: don't place if a player is occupying the target blockspace.
+        if (isAnyPlayerOccupyingBlockspace(targetLoc)) {
+            return;
+        }
+
         target.setType(held, true);
 
         // Best-effort facing.
@@ -591,6 +639,12 @@ public class TubeListener implements Listener {
         // Prevent normal block interaction (this is air server-side anyway).
         e.setCancelled(true);
 
+        if (e.getPlayer().getGameMode() != GameMode.CREATIVE
+                && !CustomBlocks.isWrenchItem(e.getPlayer().getInventory().getItemInMainHand())) {
+            e.getPlayer().sendMessage("§cYou need a Cloud Wrench to remove tubes.");
+            return;
+        }
+
         debug.log("onLeftClickTubeBlock", "Player " + e.getPlayer().getName() + " removed tube at " + tubeLoc);
         CloudFrameRegistry.tubes().removeTube(tubeLoc);
 
@@ -611,6 +665,12 @@ public class TubeListener implements Listener {
 
         // Interaction entities aren't meant to take damage, but cancel regardless.
         e.setCancelled(true);
+
+        if (player.getGameMode() != GameMode.CREATIVE
+                && !CustomBlocks.isWrenchItem(player.getInventory().getItemInMainHand())) {
+            player.sendMessage("§cYou need a Cloud Wrench to remove tubes.");
+            return;
+        }
 
         if (CloudFrameRegistry.tubes().getTube(tubeLoc) == null) {
             return;
@@ -654,6 +714,12 @@ public class TubeListener implements Listener {
 
         // Cancel breaking the block behind; break the tube instead.
         e.setCancelled(true);
+
+        if (e.getPlayer().getGameMode() != GameMode.CREATIVE
+                && !CustomBlocks.isWrenchItem(e.getPlayer().getInventory().getItemInMainHand())) {
+            e.getPlayer().sendMessage("§cYou need a Cloud Wrench to remove tubes.");
+            return;
+        }
 
         if (CloudFrameRegistry.tubes().getTube(tubeLoc) == null) return;
 

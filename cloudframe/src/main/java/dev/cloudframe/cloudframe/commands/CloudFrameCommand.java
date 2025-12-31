@@ -23,7 +23,7 @@ public class CloudFrameCommand implements CommandExecutor {
         if (args.length == 0) {
             debug.log("onCommand", "No subcommand provided");
             sender.sendMessage("§e/cloudframe give <item>");
-            sender.sendMessage("§e/cloudframe log [count|clear|tick]");
+            sender.sendMessage("§e/cloudframe log [count|clear|tick|chunk|startup|pack|visuals|pick]");
             sender.sendMessage("§e/cloudframe model  §7(Inspect held item)");
             return true;
         }
@@ -31,18 +31,24 @@ public class CloudFrameCommand implements CommandExecutor {
         String sub = args[0].toLowerCase();
         debug.log("onCommand", "Dispatching subcommand=" + sub);
 
+        // Pass subcommand args only (strip the subcommand itself).
+        String[] subArgs = new String[Math.max(0, args.length - 1)];
+        if (args.length > 1) {
+            System.arraycopy(args, 1, subArgs, 0, args.length - 1);
+        }
+
         switch (sub) {
 
             case "give" -> {
-                return give.onCommand(sender, cmd, label, args);
+                return give.onCommand(sender, cmd, label, subArgs);
             }
 
             case "log" -> {
-                return log.onCommand(sender, cmd, label, args);
+                return log.onCommand(sender, cmd, label, subArgs);
             }
 
             case "model" -> {
-                return model.onCommand(sender, cmd, label, args);
+                return model.onCommand(sender, cmd, label, subArgs);
             }
 
             default -> {

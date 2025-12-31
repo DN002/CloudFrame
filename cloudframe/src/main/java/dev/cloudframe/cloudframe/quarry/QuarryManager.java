@@ -20,6 +20,7 @@ import dev.cloudframe.cloudframe.util.Region;
 import dev.cloudframe.cloudframe.storage.Database;
 import dev.cloudframe.cloudframe.util.CustomBlocks;
 import dev.cloudframe.cloudframe.util.Debug;
+import dev.cloudframe.cloudframe.util.DebugFlags;
 import dev.cloudframe.cloudframe.util.DebugManager;
 
 public class QuarryManager {
@@ -30,7 +31,19 @@ public class QuarryManager {
 
     // Controllers that have been placed but not yet finalized into a quarry.
     // This keeps entity-only controllers from disappearing on chunk refresh.
-    private final Map<Location, Integer> unregisteredControllers = new HashMap<>();
+    // Also tracks any stored augments carried by the controller item.
+    private final Map<Location, UnregisteredControllerData> unregisteredControllers = new HashMap<>();
+
+    // Chunk index for controller visuals/collision (includes registered + unregistered).
+    private final Map<ChunkKey, Set<Location>> controllersByChunk = new HashMap<>();
+
+    private record ChunkKey(UUID worldId, int cx, int cz) {}
+
+    public record UnregisteredControllerData(int yaw, boolean silkTouch, int speedLevel) {
+        public UnregisteredControllerData {
+            if (speedLevel < 0) speedLevel = 0;
+        }
+    }
 
     private ControllerVisualManager visualManager;
 
@@ -51,13 +64,22 @@ public class QuarryManager {
     }
 
     public java.util.List<Location> controllerLocationsInChunk(org.bukkit.Chunk chunk) {
+        ChunkKey key = new ChunkKey(chunk.getWorld().getUID(), chunk.getX(), chunk.getZ());
+        Set<Location> set = controllersByChunk.get(key);
+        if (set != null && !set.isEmpty()) {
+            return java.util.List.copyOf(set);
+        }
+
+        // Fallback: if the index is out of sync (e.g., hot-reload edge cases),
+        // compute locations from source-of-truth collections.
         java.util.List<Location> out = new java.util.ArrayList<>();
+
         for (Quarry q : quarries) {
             Location loc = q.getController();
             if (loc == null || loc.getWorld() == null) continue;
             if (!loc.getWorld().equals(chunk.getWorld())) continue;
             if ((loc.getBlockX() >> 4) == chunk.getX() && (loc.getBlockZ() >> 4) == chunk.getZ()) {
-                out.add(loc);
+                out.add(norm(loc));
             }
         }
 
@@ -65,16 +87,29 @@ public class QuarryManager {
             if (loc == null || loc.getWorld() == null) continue;
             if (!loc.getWorld().equals(chunk.getWorld())) continue;
             if ((loc.getBlockX() >> 4) == chunk.getX() && (loc.getBlockZ() >> 4) == chunk.getZ()) {
-                out.add(loc);
+                out.add(norm(loc));
             }
         }
+
+        // Best-effort: repopulate the index for this chunk.
+        if (!out.isEmpty()) {
+            controllersByChunk.put(key, new java.util.HashSet<>(out));
+        }
+
         return out;
     }
 
     public void markUnregisteredController(Location loc, int controllerYaw) {
+        markUnregisteredController(loc, controllerYaw, false, 0);
+    }
+
+    public void markUnregisteredController(Location loc, int controllerYaw, boolean silkTouch, int speedLevel) {
         loc = norm(loc);
-        unregisteredControllers.put(loc, controllerYaw);
-        debug.log("markUnregisteredController", "Marked unregistered controller at " + loc + " yaw=" + controllerYaw + " (count=" + unregisteredControllers.size() + ")");
+        unregisteredControllers.put(loc, new UnregisteredControllerData(controllerYaw, silkTouch, speedLevel));
+        indexAddController(loc);
+        if (DebugFlags.STARTUP_LOAD_LOGGING) {
+            debug.log("markUnregisteredController", "Marked unregistered controller at " + loc + " yaw=" + controllerYaw + " silk=" + silkTouch + " speed=" + speedLevel + " (count=" + unregisteredControllers.size() + ")");
+        }
         if (visualManager != null) {
             visualManager.ensureController(loc, controllerYaw);
         }
@@ -86,7 +121,12 @@ public class QuarryManager {
     public void unmarkUnregisteredController(Location loc) {
         loc = norm(loc);
         boolean removed = unregisteredControllers.remove(loc) != null;
-        debug.log("unmarkUnregisteredController", "Unmarked unregistered controller at " + loc + " removed=" + removed + " (count=" + unregisteredControllers.size() + ")");
+        if (removed) {
+            indexRemoveController(loc);
+        }
+        if (DebugFlags.STARTUP_LOAD_LOGGING) {
+            debug.log("unmarkUnregisteredController", "Unmarked unregistered controller at " + loc + " removed=" + removed + " (count=" + unregisteredControllers.size() + ")");
+        }
 
         // Ensure tubes around it disconnect immediately.
         refreshAdjacentTubes(loc);
@@ -94,10 +134,15 @@ public class QuarryManager {
 
     public void register(Quarry q) {
         quarries.add(q);
-        debug.log("register", "Registered quarry for owner=" + q.getOwner() +
-                " controller=" + q.getController());
+        if (DebugFlags.STARTUP_LOAD_LOGGING) {
+            debug.log("register", "Registered quarry for owner=" + q.getOwner() +
+                    " controller=" + q.getController());
+        }
 
         unmarkUnregisteredController(q.getController());
+
+        // Index controller for chunk-based lookup (collision/visuals).
+        indexAddController(q.getController());
 
         if (visualManager != null) {
             visualManager.ensureController(q.getController(), q.getControllerYaw());
@@ -111,8 +156,25 @@ public class QuarryManager {
         controllerLoc = norm(controllerLoc);
         Quarry q = getByController(controllerLoc);
         if (q != null) return q.getControllerYaw();
-        Integer yaw = unregisteredControllers.get(controllerLoc);
-        return yaw != null ? yaw : 0;
+        UnregisteredControllerData data = unregisteredControllers.get(controllerLoc);
+        return data != null ? data.yaw() : 0;
+    }
+
+    public UnregisteredControllerData getUnregisteredControllerData(Location controllerLoc) {
+        if (controllerLoc == null) return null;
+        return unregisteredControllers.get(norm(controllerLoc));
+    }
+
+    public boolean updateUnregisteredControllerAugments(Location controllerLoc, boolean silkTouch, int speedLevel) {
+        if (controllerLoc == null) return false;
+        controllerLoc = norm(controllerLoc);
+
+        UnregisteredControllerData current = unregisteredControllers.get(controllerLoc);
+        if (current == null) return false;
+
+        unregisteredControllers.put(controllerLoc, new UnregisteredControllerData(current.yaw(), silkTouch, speedLevel));
+        debug.log("updateUnregisteredControllerAugments", "Updated unregistered controller at " + controllerLoc + " silk=" + silkTouch + " speed=" + speedLevel);
+        return true;
     }
 
     public boolean hasControllerAt(Location controllerLoc) {
@@ -149,8 +211,8 @@ public class QuarryManager {
 
             var ps = conn.prepareStatement("""
                 INSERT INTO quarries
-                (owner, world, ax, ay, az, bx, by, bz, controllerX, controllerY, controllerZ, active, controllerYaw, silkTouch, speedLevel)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (owner, world, ax, ay, az, bx, by, bz, controllerX, controllerY, controllerZ, active, controllerYaw, silkTouch, speedLevel, outputRoundRobin)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """);
 
             for (Quarry q : quarries) {
@@ -182,6 +244,8 @@ public class QuarryManager {
                 ps.setInt(14, q.hasSilkTouchAugment() ? 1 : 0);
                 ps.setInt(15, q.getSpeedAugmentLevel());
 
+                ps.setInt(16, q.isOutputRoundRobin() ? 1 : 0);
+
                 ps.addBatch();
             }
 
@@ -190,19 +254,24 @@ public class QuarryManager {
             // Persist unregistered (unfinalized) controllers too.
             conn.createStatement().executeUpdate("DELETE FROM unregistered_controllers");
             var cps = conn.prepareStatement(
-                "INSERT INTO unregistered_controllers (world, x, y, z, yaw) VALUES (?, ?, ?, ?, ?)"
+                "INSERT INTO unregistered_controllers (world, x, y, z, yaw, silkTouch, speedLevel) VALUES (?, ?, ?, ?, ?, ?, ?)"
             );
 
-            for (Map.Entry<Location, Integer> entry : unregisteredControllers.entrySet()) {
+            for (Map.Entry<Location, UnregisteredControllerData> entry : unregisteredControllers.entrySet()) {
                 Location loc = entry.getKey();
                 if (loc == null || loc.getWorld() == null) continue;
-                int yaw = entry.getValue() != null ? entry.getValue() : 0;
+                UnregisteredControllerData data = entry.getValue();
+                int yaw = data != null ? data.yaw() : 0;
+                boolean silkTouch = data != null && data.silkTouch();
+                int speedLevel = data != null ? data.speedLevel() : 0;
 
                 cps.setString(1, loc.getWorld().getName());
                 cps.setInt(2, loc.getBlockX());
                 cps.setInt(3, loc.getBlockY());
                 cps.setInt(4, loc.getBlockZ());
                 cps.setInt(5, yaw);
+                cps.setInt(6, silkTouch ? 1 : 0);
+                cps.setInt(7, Math.max(0, speedLevel));
                 cps.addBatch();
             }
 
@@ -217,6 +286,7 @@ public class QuarryManager {
 
         quarries.clear(); // prevent duplicates on reload
         unregisteredControllers.clear();
+        controllersByChunk.clear();
 
         Database.run(conn -> {
             var rs = conn.createStatement().executeQuery("SELECT * FROM quarries");
@@ -281,12 +351,22 @@ public class QuarryManager {
                 q.setSilkTouchAugment(silkTouch);
                 q.setSpeedAugmentLevel(speedLevel);
 
+                boolean outputRoundRobin = true;
+                try {
+                    outputRoundRobin = rs.getInt("outputRoundRobin") == 1;
+                } catch (java.sql.SQLException ignored) {
+                    // Older DBs won't have this column.
+                }
+                q.setOutputRoundRobin(outputRoundRobin);
+
                 boolean active = rs.getInt("active") == 1;
                 q.setActive(active);
 
-                debug.log("loadAll", "Loaded quarry owner=" + owner +
+                if (DebugFlags.STARTUP_LOAD_LOGGING) {
+                    debug.log("loadAll", "Loaded quarry owner=" + owner +
                         " controller=" + controller +
                         " active=" + active);
+                }
 
                 // Migration cleanup: older versions used NOTE_BLOCKs for controllers.
                 // Entity-only controller should not leave blocks behind.
@@ -312,6 +392,20 @@ public class QuarryManager {
                         // Older DBs may not have yaw.
                     }
 
+                    boolean silkTouch = false;
+                    try {
+                        silkTouch = crs.getInt("silkTouch") == 1;
+                    } catch (java.sql.SQLException ignored) {
+                        // Older DBs may not have this column.
+                    }
+
+                    int speedLevel = 0;
+                    try {
+                        speedLevel = crs.getInt("speedLevel");
+                    } catch (java.sql.SQLException ignored) {
+                        // Older DBs may not have this column.
+                    }
+
                     var w = Bukkit.getWorld(world);
                     if (w == null) {
                         debug.log("loadAll", "World not found: " + world + " — skipping unregistered controller");
@@ -321,11 +415,13 @@ public class QuarryManager {
                     Location loc = new Location(w, x, y, z);
                     // Don't duplicate controllers that are already registered as quarries.
                     if (getByController(loc) != null) continue;
-                    markUnregisteredController(loc, yaw);
+                    markUnregisteredController(loc, yaw, silkTouch, speedLevel);
                 }
             } catch (java.sql.SQLException ex) {
                 // Table may not exist in very old DBs; ignore.
-                debug.log("loadAll", "No unregistered_controllers table found; skipping");
+                if (DebugFlags.STARTUP_LOAD_LOGGING) {
+                    debug.log("loadAll", "No unregistered_controllers table found; skipping");
+                }
             }
         });
 
@@ -336,6 +432,8 @@ public class QuarryManager {
         quarries.remove(q);
         debug.log("remove", "Removed quarry owner=" + q.getOwner() +
                 " controller=" + q.getController());
+
+        indexRemoveController(q.getController());
 
         if (visualManager != null) {
             visualManager.removeController(q.getController());
@@ -352,11 +450,16 @@ public class QuarryManager {
                 q.getController().getBlockY() == loc.getBlockY() &&
                 q.getController().getBlockZ() == loc.getBlockZ()) {
 
-                debug.log("getByController", "Found quarry for controller=" + loc);
+                if (DebugFlags.STARTUP_LOAD_LOGGING) {
+                    debug.log("getByController", "Found quarry for controller=" + loc);
+                }
                 return q;
             }
         }
-        debug.log("getByController", "No quarry found for controller=" + loc);
+        // Called frequently by ray checks; keep silent unless verbose logging is enabled.
+        if (DebugFlags.STARTUP_LOAD_LOGGING) {
+            debug.log("getByController", "No quarry found for controller=" + loc);
+        }
         return null;
     }
 
@@ -367,6 +470,23 @@ public class QuarryManager {
                 loc.getBlockY(),
                 loc.getBlockZ()
         );
+    }
+
+    private void indexAddController(Location loc) {
+        if (loc == null || loc.getWorld() == null) return;
+        var chunk = loc.getChunk();
+        ChunkKey key = new ChunkKey(chunk.getWorld().getUID(), chunk.getX(), chunk.getZ());
+        controllersByChunk.computeIfAbsent(key, k -> new HashSet<>()).add(loc);
+    }
+
+    private void indexRemoveController(Location loc) {
+        if (loc == null || loc.getWorld() == null) return;
+        var chunk = loc.getChunk();
+        ChunkKey key = new ChunkKey(chunk.getWorld().getUID(), chunk.getX(), chunk.getZ());
+        Set<Location> set = controllersByChunk.get(key);
+        if (set == null) return;
+        set.remove(loc);
+        if (set.isEmpty()) controllersByChunk.remove(key);
     }
 
     private static void refreshAdjacentTubes(Location controllerLoc) {

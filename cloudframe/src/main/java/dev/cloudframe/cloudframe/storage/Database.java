@@ -68,6 +68,13 @@ public class Database {
                 // Column already exists (or table is new).
             }
 
+            // Best-effort migration for output routing mode.
+            try {
+                stmt.executeUpdate("ALTER TABLE quarries ADD COLUMN outputRoundRobin INTEGER DEFAULT 1");
+            } catch (SQLException ignored) {
+                // Column already exists (or table is new).
+            }
+
             // Tubes table
             stmt.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS tubes (
@@ -93,9 +100,24 @@ public class Database {
                     y INTEGER NOT NULL,
                     z INTEGER NOT NULL,
                     yaw INTEGER DEFAULT 0,
+                    silkTouch INTEGER DEFAULT 0,
+                    speedLevel INTEGER DEFAULT 0,
                     PRIMARY KEY (world, x, y, z)
                 );
             """);
+
+            // Best-effort migrations for stored controller augments.
+            try {
+                stmt.executeUpdate("ALTER TABLE unregistered_controllers ADD COLUMN silkTouch INTEGER DEFAULT 0");
+            } catch (SQLException ignored) {
+                // Column already exists.
+            }
+
+            try {
+                stmt.executeUpdate("ALTER TABLE unregistered_controllers ADD COLUMN speedLevel INTEGER DEFAULT 0");
+            } catch (SQLException ignored) {
+                // Column already exists.
+            }
         }
     }
 

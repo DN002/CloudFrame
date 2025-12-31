@@ -34,6 +34,46 @@ public class CloudFrameLogCommand implements CommandExecutor {
 
             return true;
         }
+
+        // /cloudframe log chunk
+        if (args.length == 1 && args[0].equalsIgnoreCase("chunk")) {
+            DebugFlags.CHUNK_LOGGING = !DebugFlags.CHUNK_LOGGING;
+            p.sendMessage("§bChunk logging is now " +
+                    (DebugFlags.CHUNK_LOGGING ? "§aENABLED" : "§cDISABLED"));
+            return true;
+        }
+
+        // /cloudframe log startup
+        if (args.length == 1 && args[0].equalsIgnoreCase("startup")) {
+            DebugFlags.STARTUP_LOAD_LOGGING = !DebugFlags.STARTUP_LOAD_LOGGING;
+            p.sendMessage("§bStartup load logging is now " +
+                    (DebugFlags.STARTUP_LOAD_LOGGING ? "§aENABLED" : "§cDISABLED"));
+            return true;
+        }
+
+        // /cloudframe log pack
+        if (args.length == 1 && args[0].equalsIgnoreCase("pack")) {
+            DebugFlags.RESOURCE_PACK_VERBOSE_LOGGING = !DebugFlags.RESOURCE_PACK_VERBOSE_LOGGING;
+            p.sendMessage("§bResource pack verbose logging is now " +
+                    (DebugFlags.RESOURCE_PACK_VERBOSE_LOGGING ? "§aENABLED" : "§cDISABLED"));
+            return true;
+        }
+
+        // /cloudframe log visuals
+        if (args.length == 1 && args[0].equalsIgnoreCase("visuals")) {
+            DebugFlags.VISUAL_SPAWN_LOGGING = !DebugFlags.VISUAL_SPAWN_LOGGING;
+            p.sendMessage("§bVisual spawn logging is now " +
+                    (DebugFlags.VISUAL_SPAWN_LOGGING ? "§aENABLED" : "§cDISABLED"));
+            return true;
+        }
+
+        // /cloudframe log pick
+        if (args.length == 1 && args[0].equalsIgnoreCase("pick")) {
+            DebugFlags.PICKBLOCK_LOGGING = !DebugFlags.PICKBLOCK_LOGGING;
+            p.sendMessage("§bPick-block logging is now " +
+                    (DebugFlags.PICKBLOCK_LOGGING ? "§aENABLED" : "§cDISABLED"));
+            return true;
+        }
         
         // /cloudframe log <count>
         int count = 30;

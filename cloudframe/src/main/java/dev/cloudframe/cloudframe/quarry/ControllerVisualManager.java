@@ -12,6 +12,7 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.Display;
 import org.bukkit.entity.Interaction;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.inventory.ItemStack;
@@ -20,7 +21,13 @@ import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import org.bukkit.util.Transformation;
+
+import org.joml.AxisAngle4f;
+import org.joml.Vector3f;
+
 import dev.cloudframe.cloudframe.util.Debug;
+import dev.cloudframe.cloudframe.util.DebugFlags;
 import dev.cloudframe.cloudframe.util.DebugManager;
 
 /**
@@ -36,9 +43,9 @@ public final class ControllerVisualManager {
     // (Defined in resource pack via assets/minecraft/items/copper_block.json)
     private static final int CMD_CONTROLLER_DISPLAY = 2101;
 
-    // The controller model's "front" is authored facing the opposite direction.
-    // Apply a fixed offset so when a player places it facing X, the front appears on X.
-    private static final int MODEL_YAW_OFFSET = 180;
+    // The controller model is authored with its front matching vanilla yaw orientation.
+    // No extra offset needed.
+    private static final int MODEL_YAW_OFFSET = 0;
 
     public static final String PDC_TAG_KEY = "cloudframe_controller_entity";
     private static final String PDC_X = "cloudframe_controller_x";
@@ -68,7 +75,9 @@ public final class ControllerVisualManager {
     }
 
     public void shutdown() {
-        debug.log("shutdown", "Removing controller visuals (interaction=" + interactionByLoc.size() + ", display=" + displayByLoc.size() + ")");
+        if (DebugFlags.VISUAL_SPAWN_LOGGING) {
+            debug.log("shutdown", "Removing controller visuals (interaction=" + interactionByLoc.size() + ", display=" + displayByLoc.size() + ")");
+        }
         for (UUID id : interactionByLoc.values()) {
             Entity e = Bukkit.getEntity(id);
             if (e != null) e.remove();
@@ -90,7 +99,7 @@ public final class ControllerVisualManager {
             }
         }
 
-        if (removed > 0) {
+        if (removed > 0 && DebugFlags.VISUAL_SPAWN_LOGGING) {
             debug.log("cleanupChunkEntities", "Removed " + removed + " tagged controller entities in chunk " +
                 chunk.getWorld().getName() + " " + chunk.getX() + "," + chunk.getZ());
         }
@@ -112,7 +121,9 @@ public final class ControllerVisualManager {
             return;
         }
 
-        debug.log("ensureController", "Ensuring controller visuals at " + controllerLoc);
+        if (DebugFlags.VISUAL_SPAWN_LOGGING) {
+            debug.log("ensureController", "Ensuring controller visuals at " + controllerLoc);
+        }
 
         ensureInteraction(controllerLoc);
         ensureDisplay(controllerLoc, controllerYaw);
@@ -121,7 +132,9 @@ public final class ControllerVisualManager {
     public void removeController(Location controllerLoc) {
         controllerLoc = norm(controllerLoc);
 
-        debug.log("removeController", "Removing controller visuals at " + controllerLoc);
+        if (DebugFlags.VISUAL_SPAWN_LOGGING) {
+            debug.log("removeController", "Removing controller visuals at " + controllerLoc);
+        }
 
         UUID iid = interactionByLoc.remove(controllerLoc);
         if (iid != null) {
@@ -143,6 +156,16 @@ public final class ControllerVisualManager {
         if (id != null) {
             Entity existing = Bukkit.getEntity(id);
             if (existing instanceof Interaction interaction && !existing.isDead()) {
+                // Always enforce our tiny hitbox so the client crosshair doesn't target
+                // the entity and suppress the vanilla selection outline.
+                try {
+                    interaction.setInteractionWidth(0.0f);
+                    interaction.setInteractionHeight(0.0f);
+                } catch (Throwable ignored) {
+                    interaction.setInteractionWidth(0.01f);
+                    interaction.setInteractionHeight(0.01f);
+                }
+
                 // Older versions spawned this at y+0.5; respawn at bottom-center so the
                 // hitbox reliably covers the entire blockspace.
                 if (interaction.getLocation().distanceSquared(desired) < 0.01) return;
@@ -159,6 +182,19 @@ public final class ControllerVisualManager {
         if (id != null) {
             Entity existing = Bukkit.getEntity(id);
             if (existing instanceof ItemDisplay disp && !existing.isDead()) {
+                // Always enforce our tiny visual hitbox so it doesn't steal crosshair targeting.
+                try {
+                    disp.setDisplayWidth(0.0f);
+                    disp.setDisplayHeight(0.0f);
+                } catch (Throwable ignored) {
+                    try {
+                        disp.setDisplayWidth(0.01f);
+                        disp.setDisplayHeight(0.01f);
+                    } catch (Throwable ignored2) {
+                        // Older API.
+                    }
+                }
+
                 disp.setRotation(applyModelYawOffset(controllerYaw), 0.0f);
                 return;
             }
@@ -179,12 +215,19 @@ public final class ControllerVisualManager {
         interaction.setGravity(false);
         interaction.setInvulnerable(true);
         interaction.setPersistent(false);
-        interaction.setInteractionWidth(0.01f);
-        interaction.setInteractionHeight(0.01f);
+        try {
+            interaction.setInteractionWidth(0.0f);
+            interaction.setInteractionHeight(0.0f);
+        } catch (Throwable ignored) {
+            interaction.setInteractionWidth(0.01f);
+            interaction.setInteractionHeight(0.01f);
+        }
 
         tag(interaction.getPersistentDataContainer(), controllerLoc, "interaction");
 
-        debug.log("spawnInteraction", "Spawned interaction id=" + interaction.getUniqueId() + " at " + controllerLoc);
+        if (DebugFlags.VISUAL_SPAWN_LOGGING) {
+            debug.log("spawnInteraction", "Spawned interaction id=" + interaction.getUniqueId() + " at " + controllerLoc);
+        }
         return interaction;
     }
 
@@ -201,10 +244,49 @@ public final class ControllerVisualManager {
         // Make the visual entity very hard to crosshair-target so the client can still
         // target the spoofed block and render the vanilla selection outline.
         try {
-            display.setDisplayWidth(0.01f);
-            display.setDisplayHeight(0.01f);
+            display.setDisplayWidth(0.0f);
+            display.setDisplayHeight(0.0f);
+        } catch (Throwable ignored) {
+            try {
+                display.setDisplayWidth(0.01f);
+                display.setDisplayHeight(0.01f);
+            } catch (Throwable ignored2) {
+                // Older API.
+            }
+        }
+
+        // Keep the display world-aligned and centered like a block model.
+        try {
+            display.setBillboard(Display.Billboard.FIXED);
         } catch (Throwable ignored) {
             // Older API.
+        }
+        try {
+            display.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.valueOf("NONE"));
+        } catch (Throwable ignored) {
+            try {
+                display.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.FIXED);
+            } catch (Throwable ignored2) {
+                // Older API.
+            }
+        }
+
+        // Preserve the server's base centering; only scale up if the transform looks shrunken.
+        try {
+            Transformation base = display.getTransformation();
+
+            Vector3f translation = new Vector3f(base.getTranslation());
+            AxisAngle4f leftRot = new AxisAngle4f(base.getLeftRotation());
+            Vector3f scale = new Vector3f(base.getScale());
+            AxisAngle4f rightRot = new AxisAngle4f(base.getRightRotation());
+
+            float factor = (scale.x < 0.75f || scale.y < 0.75f || scale.z < 0.75f) ? 2.0f : 1.0f;
+            if (factor != 1.0f) {
+                scale.mul(factor);
+                display.setTransformation(new Transformation(translation, leftRot, scale, rightRot));
+            }
+        } catch (Throwable ignored) {
+            // If Transformation/JOML isn't available at runtime, leave defaults.
         }
 
         display.setItemStack(controllerDisplayStack());
@@ -212,7 +294,9 @@ public final class ControllerVisualManager {
 
         tag(display.getPersistentDataContainer(), controllerLoc, "display");
 
-        debug.log("spawnDisplay", "Spawned display id=" + display.getUniqueId() + " at " + controllerLoc);
+        if (DebugFlags.VISUAL_SPAWN_LOGGING) {
+            debug.log("spawnDisplay", "Spawned display id=" + display.getUniqueId() + " at " + controllerLoc);
+        }
         return display;
     }
 

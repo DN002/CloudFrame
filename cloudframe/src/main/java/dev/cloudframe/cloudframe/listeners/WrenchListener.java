@@ -3,10 +3,14 @@ package dev.cloudframe.cloudframe.listeners;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.util.Vector;
 
 import dev.cloudframe.cloudframe.core.CloudFrameRegistry;
 import dev.cloudframe.cloudframe.quarry.Quarry;
@@ -20,11 +24,70 @@ public class WrenchListener implements Listener {
     private static final int MIN_QUARRY_SIZE = 3;
     private static final int MAX_QUARRY_SIZE = 128;
 
-    @EventHandler
+    // Debounce finalization calls because controller clicks can be reported through multiple
+    // interaction events (blockspace + entity) for the same user action.
+    private static final java.util.Map<java.util.UUID, Long> lastFinalizeMs = new java.util.HashMap<>();
+    private static final long FINALIZE_DEBOUNCE_MS = 150;
+
+    private static boolean shouldDebounceFinalize(Player p) {
+        if (p == null) return true;
+        long now = System.currentTimeMillis();
+        long last = lastFinalizeMs.getOrDefault(p.getUniqueId(), 0L);
+        if (now - last < FINALIZE_DEBOUNCE_MS) {
+            return true;
+        }
+        lastFinalizeMs.put(p.getUniqueId(), now);
+        return false;
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onInteract(PlayerInteractEvent e) {
         Player p = e.getPlayer();
 
+        // Avoid double-fire (main hand + off hand).
+        if (e.getHand() != EquipmentSlot.HAND) {
+            return;
+        }
+
         if (!isWrench(p.getInventory().getItemInMainHand())) {
+            return;
+        }
+
+        Action action = e.getAction();
+        if (action != Action.RIGHT_CLICK_BLOCK && action != Action.RIGHT_CLICK_AIR) {
+            return;
+        }
+
+        // Finalization fallback: when the player clicks the controller's client-side selection box,
+        // the server sees an "air" block click. Handle that first so we don't show marker errors.
+        Location controllerLoc = null;
+        if (action == Action.RIGHT_CLICK_BLOCK) {
+            if (e.getClickedBlock() != null && e.getClickedBlock().getType().isAir()) {
+                Location maybeControllerLoc = e.getClickedBlock().getLocation();
+                if (CloudFrameRegistry.quarries().hasControllerAt(maybeControllerLoc)) {
+                    controllerLoc = maybeControllerLoc;
+                }
+            }
+        } else if (action == Action.RIGHT_CLICK_AIR) {
+            // Only do a look-based fallback for air clicks, so we don't hijack legitimate block clicks.
+            controllerLoc = raytraceLookedController(p, false);
+        }
+
+        if (controllerLoc != null) {
+            // If it's already finalized, don't do marker-frame logic either.
+            if (CloudFrameRegistry.quarries().getByController(controllerLoc) != null) {
+                e.setCancelled(true);
+                return;
+            }
+
+            if (shouldDebounceFinalize(p)) {
+                e.setCancelled(true);
+                return;
+            }
+
+            debug.log("onInteract", "Finalizing quarry via controller blockspace at " + controllerLoc);
+            finalizeQuarryAt(p, controllerLoc);
+            e.setCancelled(true);
             return;
         }
 
@@ -66,8 +129,7 @@ public class WrenchListener implements Listener {
         if (!isValidQuarrySize(region)) {
             debug.log("onInteract", "Invalid quarry size: width=" + region.width() +
                     " length=" + region.length());
-            p.sendMessage("§cQuarry must be square between " + MIN_QUARRY_SIZE + "x" + MIN_QUARRY_SIZE +
-                " and " + MAX_QUARRY_SIZE + "x" + MAX_QUARRY_SIZE + " (got " + region.width() + "x" + region.length() + ").");
+            p.sendMessage("§cQuarry must be between " + MIN_QUARRY_SIZE + ".." + MAX_QUARRY_SIZE + " blocks on each side (got " + region.width() + "x" + region.length() + ").");
             return;
         }
 
@@ -144,9 +206,104 @@ public class WrenchListener implements Listener {
         debug.log("onInteract", "Cleared markers for " + p.getName());
     }
 
+    /**
+     * Voxel ray-walk to find an unregistered controller blockspace the player is looking at.
+     * This avoids relying on entity hitboxes (which are intentionally tiny).
+     */
+    private static Location raytraceLookedController(Player player, boolean requireUnregistered) {
+        if (player == null) return null;
+        var eye = player.getEyeLocation();
+        var world = eye.getWorld();
+        if (world == null) return null;
+
+        Vector dir = eye.getDirection();
+        if (dir == null) return null;
+        dir = dir.clone();
+        if (dir.lengthSquared() < 1.0E-9) return null;
+        dir.normalize();
+
+        // Keep it close to vanilla block reach.
+        final double maxDist = 6.0;
+
+        double ox = eye.getX();
+        double oy = eye.getY();
+        double oz = eye.getZ();
+
+        int x = (int) Math.floor(ox);
+        int y = (int) Math.floor(oy);
+        int z = (int) Math.floor(oz);
+
+        double dx = dir.getX();
+        double dy = dir.getY();
+        double dz = dir.getZ();
+
+        int stepX = dx > 0 ? 1 : (dx < 0 ? -1 : 0);
+        int stepY = dy > 0 ? 1 : (dy < 0 ? -1 : 0);
+        int stepZ = dz > 0 ? 1 : (dz < 0 ? -1 : 0);
+
+        double tDeltaX = stepX == 0 ? Double.POSITIVE_INFINITY : Math.abs(1.0 / dx);
+        double tDeltaY = stepY == 0 ? Double.POSITIVE_INFINITY : Math.abs(1.0 / dy);
+        double tDeltaZ = stepZ == 0 ? Double.POSITIVE_INFINITY : Math.abs(1.0 / dz);
+
+        double nextVoxelBoundaryX = stepX > 0 ? (x + 1.0) : x;
+        double nextVoxelBoundaryY = stepY > 0 ? (y + 1.0) : y;
+        double nextVoxelBoundaryZ = stepZ > 0 ? (z + 1.0) : z;
+
+        double tMaxX = stepX == 0 ? Double.POSITIVE_INFINITY : (nextVoxelBoundaryX - ox) / dx;
+        double tMaxY = stepY == 0 ? Double.POSITIVE_INFINITY : (nextVoxelBoundaryY - oy) / dy;
+        double tMaxZ = stepZ == 0 ? Double.POSITIVE_INFINITY : (nextVoxelBoundaryZ - oz) / dz;
+
+        // Ensure positive times.
+        if (tMaxX < 0) tMaxX = 0;
+        if (tMaxY < 0) tMaxY = 0;
+        if (tMaxZ < 0) tMaxZ = 0;
+
+        double traveled = 0.0;
+        int steps = 0;
+        int maxSteps = (int) Math.ceil(maxDist * 16);
+
+        while (steps++ < maxSteps && traveled <= maxDist) {
+            Location blockLoc = new Location(world, x, y, z);
+            if (CloudFrameRegistry.quarries().hasControllerAt(blockLoc)) {
+                if (!requireUnregistered || CloudFrameRegistry.quarries().getByController(blockLoc) == null) {
+                    return blockLoc;
+                }
+            }
+
+            if (tMaxX < tMaxY) {
+                if (tMaxX < tMaxZ) {
+                    x += stepX;
+                    traveled = tMaxX;
+                    tMaxX += tDeltaX;
+                } else {
+                    z += stepZ;
+                    traveled = tMaxZ;
+                    tMaxZ += tDeltaZ;
+                }
+            } else {
+                if (tMaxY < tMaxZ) {
+                    y += stepY;
+                    traveled = tMaxY;
+                    tMaxY += tDeltaY;
+                } else {
+                    z += stepZ;
+                    traveled = tMaxZ;
+                    tMaxZ += tDeltaZ;
+                }
+            }
+        }
+
+        return null;
+    }
+
     @EventHandler
     public void onInteractControllerEntity(PlayerInteractEntityEvent e) {
         Player p = e.getPlayer();
+
+        // Avoid double-fire (main hand + off hand).
+        if (e.getHand() != EquipmentSlot.HAND) {
+            return;
+        }
 
         if (!isWrench(p.getInventory().getItemInMainHand())) {
             return;
@@ -165,6 +322,11 @@ public class WrenchListener implements Listener {
 
         // Already registered? Let ControllerListener handle opening the GUI.
         if (CloudFrameRegistry.quarries().getByController(controllerLoc) != null) {
+            return;
+        }
+
+        if (shouldDebounceFinalize(p)) {
+            e.setCancelled(true);
             return;
         }
 
@@ -209,7 +371,7 @@ public class WrenchListener implements Listener {
 
     /**
      * Try to infer a quarry region by locating glass frame blocks near the controller.
-        * Returns a Region if a valid frame (MIN..MAX square) is found, otherwise null.
+          * Returns a Region if a valid frame (MIN..MAX rectangle) is found, otherwise null.
      */
     private Region inferRegionFromBorder(Location controllerLoc) {
         var world = controllerLoc.getWorld();
@@ -294,15 +456,11 @@ public class WrenchListener implements Listener {
             );
 
             // The outer glass frame is (innerSize + 2) on each axis.
-            // Accept any square inner size in [MIN..MAX].
-            if (width != length) {
-                continue;
-            }
-
-            int innerSize = width - 2;
-            if (innerSize < MIN_QUARRY_SIZE || innerSize > MAX_QUARRY_SIZE) {
-                continue;
-            }
+            // Accept any rectangle inner size in [MIN..MAX] per axis.
+            int innerW = width - 2;
+            int innerL = length - 2;
+            if (innerW < MIN_QUARRY_SIZE || innerW > MAX_QUARRY_SIZE) continue;
+            if (innerL < MIN_QUARRY_SIZE || innerL > MAX_QUARRY_SIZE) continue;
 
             // Validate it's a complete border ring (glass all along the perimeter).
             boolean borderOk = true;
@@ -376,8 +534,7 @@ public class WrenchListener implements Listener {
         if (!isValidQuarrySize(region)) {
             debug.log("finalizeQuarryAt", "Invalid quarry size: width=" + region.width() +
                 " length=" + region.length());
-            p.sendMessage("§cQuarry must be square between " + MIN_QUARRY_SIZE + "x" + MIN_QUARRY_SIZE +
-                " and " + MAX_QUARRY_SIZE + "x" + MAX_QUARRY_SIZE + " (got " + region.width() + "x" + region.length() + ").");
+            p.sendMessage("§cQuarry must be between " + MIN_QUARRY_SIZE + ".." + MAX_QUARRY_SIZE + " blocks on each side (got " + region.width() + "x" + region.length() + ").");
             return;
         }
 
@@ -430,9 +587,14 @@ public class WrenchListener implements Listener {
             debug.log("finalizeQuarryAt", "Controller adjacent to frame — accepting placement at " + controllerLoc);
         }
 
-        // Build border (if not already present)
-        debug.log("finalizeQuarryAt", "Building quarry border for region " + region);
-        buildBorder(region);
+        // Do NOT generate the glass frame during finalization.
+        // Require an existing valid frame near the controller (handles controller being one block above/below).
+        Integer frameY = findExistingFrameY(controllerLoc, region);
+        if (frameY == null) {
+            debug.log("finalizeQuarryAt", "No valid glass frame found near controller=" + controllerLoc + " for region=" + region);
+            p.sendMessage("§cNo valid glass frame found near this controller. Build the frame first, then finalize.");
+            return;
+        }
 
         // Prepare posA/posB for constructor (use region corners)
         Location aLoc = new Location(region.getWorld(), region.minX(), region.minY(), region.minZ());
@@ -440,6 +602,9 @@ public class WrenchListener implements Listener {
 
         // Register quarry with the placed controller block as controller
         int controllerYaw = CloudFrameRegistry.quarries().getControllerYaw(controllerLoc);
+
+        // Snapshot any stored augments on this (unregistered) controller BEFORE register() clears it.
+        var stored = CloudFrameRegistry.quarries().getUnregisteredControllerData(controllerLoc);
         Quarry quarry = new Quarry(
             p.getUniqueId(),
             aLoc,
@@ -448,6 +613,11 @@ public class WrenchListener implements Listener {
             controllerLoc,
             controllerYaw
         );
+
+        if (stored != null) {
+            quarry.setSilkTouchAugment(stored.silkTouch());
+            quarry.setSpeedAugmentLevel(stored.speedLevel());
+        }
 
         CloudFrameRegistry.quarries().register(quarry);
         debug.log("finalizeQuarryAt", "Registered new quarry for owner=" + p.getUniqueId());
@@ -470,8 +640,46 @@ public class WrenchListener implements Listener {
         int w = region.width();
         int l = region.length();
 
-        if (w != l) return false;
         if (w < MIN_QUARRY_SIZE || w > MAX_QUARRY_SIZE) return false;
+        if (l < MIN_QUARRY_SIZE || l > MAX_QUARRY_SIZE) return false;
+        return true;
+    }
+
+    private static Integer findExistingFrameY(Location controllerLoc, Region innerRegion) {
+        if (controllerLoc == null || controllerLoc.getWorld() == null) return null;
+        if (innerRegion == null || innerRegion.getWorld() == null) return null;
+
+        int baseY = controllerLoc.getBlockY();
+        int[] yCandidates = new int[] { baseY, baseY - 1, baseY + 1, baseY - 2, baseY + 2 };
+
+        for (int y : yCandidates) {
+            if (isGlassBorderPresent(innerRegion, y)) {
+                return y;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isGlassBorderPresent(Region innerRegion, int frameY) {
+        if (innerRegion == null || innerRegion.getWorld() == null) return false;
+
+        int y = frameY;
+
+        int minX = innerRegion.minX() - 1;
+        int maxX = innerRegion.maxX() + 1;
+        int minZ = innerRegion.minZ() - 1;
+        int maxZ = innerRegion.maxZ() + 1;
+
+        // Perimeter check only (O(perimeter)), not full fill.
+        for (int x = minX; x <= maxX; x++) {
+            if (innerRegion.getWorld().getBlockAt(x, y, minZ).getType() != Material.GLASS) return false;
+            if (innerRegion.getWorld().getBlockAt(x, y, maxZ).getType() != Material.GLASS) return false;
+        }
+        for (int z = minZ; z <= maxZ; z++) {
+            if (innerRegion.getWorld().getBlockAt(minX, y, z).getType() != Material.GLASS) return false;
+            if (innerRegion.getWorld().getBlockAt(maxX, y, z).getType() != Material.GLASS) return false;
+        }
+
         return true;
     }
 }

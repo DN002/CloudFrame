@@ -3,6 +3,9 @@ package dev.cloudframe.cloudframe.listeners;
 import org.bukkit.Location;
 import org.bukkit.GameMode;
 import org.bukkit.Material;
+import org.bukkit.Bukkit;
+import org.bukkit.Sound;
+import org.bukkit.SoundGroup;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.BlockData;
@@ -11,8 +14,10 @@ import org.bukkit.block.data.Bisected;
 import org.bukkit.block.data.type.Bed;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.entity.Interaction;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
+import org.bukkit.event.Event;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
@@ -23,9 +28,11 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.util.RayTraceResult;
+import org.bukkit.util.BoundingBox;
 import org.bukkit.util.Vector;
 
 import dev.cloudframe.cloudframe.core.CloudFrameRegistry;
+import dev.cloudframe.cloudframe.gui.UnfinalizedControllerGUI;
 import dev.cloudframe.cloudframe.gui.QuarryGUI;
 import dev.cloudframe.cloudframe.quarry.Quarry;
 import dev.cloudframe.cloudframe.items.SilkTouchAugment;
@@ -67,10 +74,13 @@ public class ControllerListener implements Listener {
 
         int yaw = snapYaw(e.getPlayer().getLocation().getYaw());
 
+        // Carry any stored augments from the controller item into this placed controller.
+        var stored = CustomBlocks.getStoredAugments(e.getItem());
+
         debug.log("onPlace", "Player " + e.getPlayer().getName() + " placed controller at " + loc);
 
         // Track as an unregistered controller so chunk refreshes keep it visible.
-        CloudFrameRegistry.quarries().markUnregisteredController(loc, yaw);
+        CloudFrameRegistry.quarries().markUnregisteredController(loc, yaw, stored.silkTouch(), stored.speedLevel());
         refreshAdjacentTubes(loc);
 
         if (e.getPlayer().getGameMode() != GameMode.CREATIVE) {
@@ -119,9 +129,12 @@ public class ControllerListener implements Listener {
 
         int yaw = snapYaw(e.getPlayer().getLocation().getYaw());
 
+        // Carry any stored augments from the controller item into this placed controller.
+        var stored = CustomBlocks.getStoredAugments(e.getPlayer().getInventory().getItemInMainHand());
+
         debug.log("onPlaceOnTube", "Player " + e.getPlayer().getName() + " placed controller at " + targetLoc + " (clicked tube " + tubeLoc + ")");
 
-        CloudFrameRegistry.quarries().markUnregisteredController(targetLoc, yaw);
+        CloudFrameRegistry.quarries().markUnregisteredController(targetLoc, yaw, stored.silkTouch(), stored.speedLevel());
         refreshAdjacentTubes(targetLoc);
 
         if (e.getPlayer().getGameMode() != GameMode.CREATIVE) {
@@ -225,7 +238,26 @@ public class ControllerListener implements Listener {
         // We are handling this interaction; prevent other plugins from treating this as use-item.
         e.setCancelled(true);
 
+        // Match vanilla: don't place if a player is occupying the target blockspace.
+        if (isAnyPlayerOccupyingBlockspace(targetLoc)) {
+            return;
+        }
+
         target.setType(held, true);
+
+        // Play vanilla-like placement sound (since vanilla placement didn't run).
+        try {
+            SoundGroup group = target.getBlockData().getSoundGroup();
+            Sound sound = group.getPlaceSound();
+            targetLoc.getWorld().playSound(targetLoc.clone().add(0.5, 0.5, 0.5), sound, group.getVolume(), group.getPitch());
+        } catch (Throwable ignored) {
+            // Best-effort fallback.
+            try {
+                targetLoc.getWorld().playSound(targetLoc.clone().add(0.5, 0.5, 0.5), Sound.BLOCK_STONE_PLACE, 1.0f, 1.0f);
+            } catch (Throwable ignored2) {
+                // ignore
+            }
+        }
 
         // Best-effort facing like vanilla placement.
         try {
@@ -250,6 +282,26 @@ public class ControllerListener implements Listener {
                 e.getPlayer().getInventory().setItemInMainHand(handItem);
             }
         }
+    }
+
+    private static boolean isAnyPlayerOccupyingBlockspace(Location loc) {
+        if (loc == null || loc.getWorld() == null) return false;
+
+        double x = loc.getBlockX();
+        double y = loc.getBlockY();
+        double z = loc.getBlockZ();
+
+        BoundingBox blockBox = new BoundingBox(x, y, z, x + 1.0, y + 1.0, z + 1.0);
+        for (Player p : loc.getWorld().getPlayers()) {
+            try {
+                if (p.getBoundingBox().overlaps(blockBox)) {
+                    return true;
+                }
+            } catch (Throwable ignored) {
+                // Best-effort.
+            }
+        }
+        return false;
     }
 
     private static Location raytraceLookedController(org.bukkit.entity.Player player) {
@@ -371,6 +423,21 @@ public class ControllerListener implements Listener {
         Location loc = clicked.getLocation();
         if (!CloudFrameRegistry.quarries().hasControllerAt(loc)) return;
 
+        // Let the wrench finalize the controller (don't steal the click).
+        var handNow = e.getPlayer().getInventory().getItemInMainHand();
+        if (CustomBlocks.isWrenchItem(handNow)) {
+            return;
+        }
+
+        // Client sometimes refreshes chunk sections on inventory open, which can briefly drop
+        // our spoofed BARRIER. Reassert immediately and again next tick.
+        ClientSelectionBoxTask.reassertSpoofNow(e.getPlayer(), loc);
+        if (CloudFrameRegistry.plugin() != null) {
+            Bukkit.getScheduler().runTask(CloudFrameRegistry.plugin(), () ->
+                ClientSelectionBoxTask.reassertSpoofNow(e.getPlayer(), loc)
+            );
+        }
+
         debug.log("onInteractBlock", "Player " + e.getPlayer().getName() + " interacted with controller block at " + loc);
 
         // Sneak-right-click with a normal block: place it against the controller like a regular block.
@@ -389,40 +456,77 @@ public class ControllerListener implements Listener {
                         return;
                     }
 
-                    e.setCancelled(true);
-                    target.setType(held, true);
-
-                    // Best-effort: set facing for directional blocks.
-                    BlockData data = target.getBlockData();
-                    if (data instanceof Directional directional) {
-                        BlockFace facing = e.getPlayer().getFacing().getOppositeFace();
-                        if (directional.getFaces().contains(facing)) {
-                            directional.setFacing(facing);
-                            target.setBlockData(directional, true);
-                        }
-                    }
-
-                    if (e.getPlayer().getGameMode() != GameMode.CREATIVE) {
-                        int amt = handItem.getAmount();
-                        if (amt <= 1) {
-                            e.getPlayer().getInventory().setItemInMainHand(null);
-                        } else {
-                            handItem.setAmount(amt - 1);
-                            e.getPlayer().getInventory().setItemInMainHand(handItem);
-                        }
-                    }
+                    // Use the same manual-placement path as the selection-box anchor, including sound.
+                    placeSimpleBlock(e, handItem, held, target.getLocation());
                     return;
                 }
             }
         }
 
-        e.setCancelled(true);
-
         Quarry q = CloudFrameRegistry.quarries().getByController(loc);
         if (q == null) {
-            e.getPlayer().sendMessage("§eController not finalized. Use a §6Wrench§e on it to finalize.");
+            // Unfinalized controller behavior: augments are stored via right-click with augment in hand.
+            var data = CloudFrameRegistry.quarries().getUnregisteredControllerData(loc);
+            boolean silk = data != null && data.silkTouch();
+            int speed = data != null ? Math.max(0, data.speedLevel()) : 0;
+
+            // If holding an augment, store it now (outside GUI).
+            if (SilkTouchAugment.isItem(handNow)) {
+                // Non-sneaking controller interaction should behave like a furnace/chest:
+                // do NOT attempt to place the held block.
+                e.setUseItemInHand(Event.Result.DENY);
+                e.setUseInteractedBlock(Event.Result.DENY);
+                e.setCancelled(true);
+
+                if (silk) {
+                    e.getPlayer().sendMessage("§eSilk Touch augment already stored.");
+                    return;
+                }
+
+                CloudFrameRegistry.quarries().updateUnregisteredControllerAugments(loc, true, speed);
+                consumeHandOne(e.getPlayer());
+                e.getPlayer().sendMessage("§aSilk Touch augment stored.");
+                return;
+            }
+
+            if (SpeedAugment.isItem(handNow)) {
+                e.setUseItemInHand(Event.Result.DENY);
+                e.setUseInteractedBlock(Event.Result.DENY);
+                e.setCancelled(true);
+
+                int newTier = SpeedAugment.getTier(handNow);
+                if (newTier <= 0) newTier = 1;
+
+                if (speed == newTier) {
+                    e.getPlayer().sendMessage("§eSpeed augment " + roman(newTier) + " already stored.");
+                    return;
+                }
+
+                // Return previous tier (if any).
+                if (speed > 0) {
+                    var leftover = e.getPlayer().getInventory().addItem(SpeedAugment.create(speed));
+                    leftover.values().forEach(it -> e.getPlayer().getWorld().dropItemNaturally(e.getPlayer().getLocation(), it));
+                }
+
+                CloudFrameRegistry.quarries().updateUnregisteredControllerAugments(loc, silk, newTier);
+                consumeHandOne(e.getPlayer());
+                e.getPlayer().sendMessage("§aSpeed augment stored (" + roman(newTier) + ").");
+                return;
+            }
+
+            // Otherwise open limited GUI for viewing/removing stored augments.
+            e.setUseItemInHand(Event.Result.DENY);
+            e.setUseInteractedBlock(Event.Result.DENY);
+            e.setCancelled(true);
+            e.getPlayer().openInventory(UnfinalizedControllerGUI.build(loc, new CustomBlocks.StoredAugments(silk, speed)));
             return;
         }
+
+        // Non-sneaking controller interaction should behave like a furnace/chest:
+        // do NOT attempt to place the held block, just open the GUI.
+        e.setUseItemInHand(Event.Result.DENY);
+        e.setUseInteractedBlock(Event.Result.DENY);
+        e.setCancelled(true);
 
         // Augment install: right-click controller with augment in hand.
         var hand = e.getPlayer().getInventory().getItemInMainHand();
@@ -474,6 +578,19 @@ public class ControllerListener implements Listener {
         );
         if (loc == null) return;
 
+        // Let the wrench finalize the controller (don't steal the click).
+        var handNow = e.getPlayer().getInventory().getItemInMainHand();
+        if (CustomBlocks.isWrenchItem(handNow)) {
+            return;
+        }
+
+        ClientSelectionBoxTask.reassertSpoofNow(e.getPlayer(), loc);
+        if (CloudFrameRegistry.plugin() != null) {
+            Bukkit.getScheduler().runTask(CloudFrameRegistry.plugin(), () ->
+                ClientSelectionBoxTask.reassertSpoofNow(e.getPlayer(), loc)
+            );
+        }
+
         debug.log("onInteract", "Player " + e.getPlayer().getName() + " interacted with controller entity at " + loc);
 
         Quarry q = CloudFrameRegistry.quarries().getByController(loc);
@@ -481,7 +598,46 @@ public class ControllerListener implements Listener {
             debug.log("onInteract", "No registered quarry controller at " + loc);
 
             // Entity-only controller exists but has not been finalized into a quarry yet.
-            e.getPlayer().sendMessage("§eController not finalized. Use a §6Wrench§e on it to finalize.");
+            var data = CloudFrameRegistry.quarries().getUnregisteredControllerData(loc);
+            boolean silk = data != null && data.silkTouch();
+            int speed = data != null ? Math.max(0, data.speedLevel()) : 0;
+
+            // Store augments via right-click with augment in hand.
+            if (SilkTouchAugment.isItem(handNow)) {
+                e.setCancelled(true);
+                if (silk) {
+                    e.getPlayer().sendMessage("§eSilk Touch augment already stored.");
+                    return;
+                }
+                CloudFrameRegistry.quarries().updateUnregisteredControllerAugments(loc, true, speed);
+                consumeHandOne(e.getPlayer());
+                e.getPlayer().sendMessage("§aSilk Touch augment stored.");
+                return;
+            }
+
+            if (SpeedAugment.isItem(handNow)) {
+                e.setCancelled(true);
+                int newTier = SpeedAugment.getTier(handNow);
+                if (newTier <= 0) newTier = 1;
+
+                if (speed == newTier) {
+                    e.getPlayer().sendMessage("§eSpeed augment " + roman(newTier) + " already stored.");
+                    return;
+                }
+
+                if (speed > 0) {
+                    var leftover = e.getPlayer().getInventory().addItem(SpeedAugment.create(speed));
+                    leftover.values().forEach(it -> e.getPlayer().getWorld().dropItemNaturally(e.getPlayer().getLocation(), it));
+                }
+
+                CloudFrameRegistry.quarries().updateUnregisteredControllerAugments(loc, silk, newTier);
+                consumeHandOne(e.getPlayer());
+                e.getPlayer().sendMessage("§aSpeed augment stored (" + roman(newTier) + ").");
+                return;
+            }
+
+            // Limited GUI: view/remove only.
+            e.getPlayer().openInventory(UnfinalizedControllerGUI.build(loc, new CustomBlocks.StoredAugments(silk, speed)));
             e.setCancelled(true);
             return;
         }
@@ -572,6 +728,12 @@ public class ControllerListener implements Listener {
         // Prevent normal block interaction (this is air server-side anyway).
         e.setCancelled(true);
 
+        if (e.getPlayer().getGameMode() != GameMode.CREATIVE
+                && !CustomBlocks.isWrenchItem(e.getPlayer().getInventory().getItemInMainHand())) {
+            e.getPlayer().sendMessage("§cYou need a Cloud Wrench to remove controllers.");
+            return;
+        }
+
         var player = e.getPlayer();
 
         Quarry q = CloudFrameRegistry.quarries().getByController(loc);
@@ -581,6 +743,8 @@ public class ControllerListener implements Listener {
                 return;
             }
 
+            var data = CloudFrameRegistry.quarries().getUnregisteredControllerData(loc);
+
             CloudFrameRegistry.quarries().unmarkUnregisteredController(loc);
 
             refreshAdjacentTubes(loc);
@@ -589,7 +753,9 @@ public class ControllerListener implements Listener {
             }
 
             if (player.getGameMode() != GameMode.CREATIVE) {
-                loc.getWorld().dropItemNaturally(loc, CustomBlocks.controllerDrop());
+                boolean silk = data != null && data.silkTouch();
+                int speed = data != null ? data.speedLevel() : 0;
+                loc.getWorld().dropItemNaturally(loc, CustomBlocks.controllerDropWithStoredAugments(silk, speed));
             }
 
             player.sendMessage("§cController picked up.");
@@ -605,7 +771,7 @@ public class ControllerListener implements Listener {
         refreshAdjacentTubes(loc);
 
         if (player.getGameMode() != GameMode.CREATIVE) {
-            loc.getWorld().dropItemNaturally(loc, CustomBlocks.controllerDrop());
+            loc.getWorld().dropItemNaturally(loc, CustomBlocks.controllerDropWithStoredAugments(q.hasSilkTouchAugment(), q.getSpeedAugmentLevel()));
         }
 
         player.sendMessage("§cQuarry removed.");
@@ -624,6 +790,12 @@ public class ControllerListener implements Listener {
         // Prevent entity damage behavior.
         e.setCancelled(true);
 
+        if (player.getGameMode() != GameMode.CREATIVE
+                && !CustomBlocks.isWrenchItem(player.getInventory().getItemInMainHand())) {
+            player.sendMessage("§cYou need a Cloud Wrench to remove controllers.");
+            return;
+        }
+
         Quarry q = CloudFrameRegistry.quarries().getByController(loc);
         if (q == null) {
             // Unregistered controller entity: allow sneak-hit to remove and get the item back.
@@ -631,6 +803,8 @@ public class ControllerListener implements Listener {
                 player.sendMessage("§eNot finalized. Use a §6Wrench§e to finalize, or §cSneak + hit§e to pick it up.");
                 return;
             }
+
+            var data = CloudFrameRegistry.quarries().getUnregisteredControllerData(loc);
 
             CloudFrameRegistry.quarries().unmarkUnregisteredController(loc);
 
@@ -642,7 +816,9 @@ public class ControllerListener implements Listener {
             }
 
             if (player.getGameMode() != org.bukkit.GameMode.CREATIVE) {
-                loc.getWorld().dropItemNaturally(loc, CustomBlocks.controllerDrop());
+                boolean silk = data != null && data.silkTouch();
+                int speed = data != null ? data.speedLevel() : 0;
+                loc.getWorld().dropItemNaturally(loc, CustomBlocks.controllerDropWithStoredAugments(silk, speed));
             }
 
             player.sendMessage("§cController picked up.");
@@ -661,7 +837,7 @@ public class ControllerListener implements Listener {
         refreshAdjacentTubes(loc);
 
         if (player.getGameMode() != org.bukkit.GameMode.CREATIVE) {
-            loc.getWorld().dropItemNaturally(loc, CustomBlocks.controllerDrop());
+            loc.getWorld().dropItemNaturally(loc, CustomBlocks.controllerDropWithStoredAugments(q.hasSilkTouchAugment(), q.getSpeedAugmentLevel()));
         }
 
         player.sendMessage("§cQuarry removed.");
@@ -693,6 +869,12 @@ public class ControllerListener implements Listener {
         // Cancel the block break and instead treat it as an attempt to break the controller.
         e.setCancelled(true);
 
+        if (e.getPlayer().getGameMode() != GameMode.CREATIVE
+                && !CustomBlocks.isWrenchItem(e.getPlayer().getInventory().getItemInMainHand())) {
+            e.getPlayer().sendMessage("§cYou need a Cloud Wrench to remove controllers.");
+            return;
+        }
+
         Location controllerLoc = shim.controllerLoc;
         if (controllerLoc == null) return;
 
@@ -705,6 +887,8 @@ public class ControllerListener implements Listener {
                 return;
             }
 
+            var data = CloudFrameRegistry.quarries().getUnregisteredControllerData(controllerLoc);
+
             CloudFrameRegistry.quarries().unmarkUnregisteredController(controllerLoc);
 
             refreshAdjacentTubes(controllerLoc);
@@ -713,7 +897,9 @@ public class ControllerListener implements Listener {
             }
 
             if (player.getGameMode() != GameMode.CREATIVE) {
-                controllerLoc.getWorld().dropItemNaturally(controllerLoc, CustomBlocks.controllerDrop());
+                boolean silk = data != null && data.silkTouch();
+                int speed = data != null ? data.speedLevel() : 0;
+                controllerLoc.getWorld().dropItemNaturally(controllerLoc, CustomBlocks.controllerDropWithStoredAugments(silk, speed));
             }
 
             player.sendMessage("§cController picked up.");
@@ -729,7 +915,7 @@ public class ControllerListener implements Listener {
 
         refreshAdjacentTubes(controllerLoc);
         if (player.getGameMode() != GameMode.CREATIVE) {
-            controllerLoc.getWorld().dropItemNaturally(controllerLoc, CustomBlocks.controllerDrop());
+            controllerLoc.getWorld().dropItemNaturally(controllerLoc, CustomBlocks.controllerDropWithStoredAugments(q.hasSilkTouchAugment(), q.getSpeedAugmentLevel()));
         }
 
         player.sendMessage("§cQuarry removed.");
@@ -753,6 +939,19 @@ public class ControllerListener implements Listener {
             if (CloudFrameRegistry.tubes().getTube(adj) != null) {
                 CloudFrameRegistry.tubes().visualsManager().updateTubeAndNeighbors(adj);
             }
+        }
+    }
+
+    private static void dropInstalledAugments(Quarry q, Location dropLoc) {
+        if (q == null || dropLoc == null || dropLoc.getWorld() == null) return;
+
+        if (q.hasSilkTouchAugment()) {
+            dropLoc.getWorld().dropItemNaturally(dropLoc, SilkTouchAugment.create());
+        }
+
+        int speed = q.getSpeedAugmentLevel();
+        if (speed > 0) {
+            dropLoc.getWorld().dropItemNaturally(dropLoc, SpeedAugment.create(speed));
         }
     }
 

@@ -8,6 +8,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import dev.cloudframe.cloudframe.listeners.TubeVisualChunkListener;
 import dev.cloudframe.cloudframe.util.InventoryUtil;
 import dev.cloudframe.cloudframe.util.Debug;
+import dev.cloudframe.cloudframe.util.DebugFlags;
 import dev.cloudframe.cloudframe.util.DebugManager;
 
 import java.util.*;
@@ -76,7 +77,9 @@ public class TubeNetworkManager {
     public void addTube(Location loc) {
         loc = norm(loc);
 
-        debug.log("addTube", "Adding tube at " + loc);
+        if (DebugFlags.STARTUP_LOAD_LOGGING) {
+            debug.log("addTube", "Adding tube at " + loc);
+        }
 
         TubeNode node = new TubeNode(loc);
         tubes.put(loc, node);
@@ -93,14 +96,18 @@ public class TubeNetworkManager {
                 ex.printStackTrace();
             }
         } else {
-            debug.log("addTube", "Tube visuals manager is null; tube will be particles-only until visuals init");
+            if (DebugFlags.STARTUP_LOAD_LOGGING) {
+                debug.log("addTube", "Tube visuals manager is null; tube will be particles-only until visuals init");
+            }
         }
     }
 
     public void removeTube(Location loc) {
         loc = norm(loc);
 
-        debug.log("removeTube", "Removing tube at " + loc);
+        if (DebugFlags.STARTUP_LOAD_LOGGING) {
+            debug.log("removeTube", "Removing tube at " + loc);
+        }
 
         tubes.remove(loc);
         indexRemove(loc);
@@ -131,7 +138,9 @@ public class TubeNetworkManager {
     private void rebuildNeighbors(Location loc) {
         loc = norm(loc);
 
-        debug.log("rebuildNeighbors", "Rebuilding neighbors for " + loc);
+        if (DebugFlags.STARTUP_LOAD_LOGGING) {
+            debug.log("rebuildNeighbors", "Rebuilding neighbors for " + loc);
+        }
 
         TubeNode node = tubes.get(loc);
         if (node == null) {
@@ -148,13 +157,17 @@ public class TubeNetworkManager {
             if (neighbor != null) {
                 node.addNeighbor(neighbor);
                 neighbor.addNeighbor(node);
-                debug.log("rebuildNeighbors", "Connected " + loc + " <-> " + adj);
+                if (DebugFlags.STARTUP_LOAD_LOGGING) {
+                    debug.log("rebuildNeighbors", "Connected " + loc + " <-> " + adj);
+                }
             }
         }
     }
 
     private void rebuildAll() {
-        debug.log("rebuildAll", "Rebuilding all tube neighbors (" + tubes.size() + " tubes)");
+        if (DebugFlags.STARTUP_LOAD_LOGGING) {
+            debug.log("rebuildAll", "Rebuilding all tube neighbors (" + tubes.size() + " tubes)");
+        }
 
         for (TubeNode node : tubes.values()) {
             node.clearNeighbors();
@@ -257,7 +270,9 @@ public class TubeNetworkManager {
     public List<TubeNode> getNeighborsOf(Location loc) {
         TubeNode node = tubes.get(norm(loc));
         if (node == null) {
-            debug.log("getNeighborsOf", "No tube at " + loc);
+            if (DebugFlags.STARTUP_LOAD_LOGGING) {
+                debug.log("getNeighborsOf", "No tube at " + loc);
+            }
             return List.of();
         }
         return node.getNeighbors();
@@ -280,7 +295,9 @@ public class TubeNetworkManager {
             for (TubeNode node : tubes.values()) {
                 Location loc = node.getLocation();
 
-                debug.log("saveAll", "Saving tube at " + loc);
+                if (DebugFlags.STARTUP_LOAD_LOGGING) {
+                    debug.log("saveAll", "Saving tube at " + loc);
+                }
 
                 ps.setString(1, loc.getWorld().getName());
                 ps.setInt(2, loc.getBlockX());
@@ -316,7 +333,9 @@ public class TubeNetworkManager {
 
                 Location loc = new Location(w, x, y, z);
 
-                debug.log("loadAll", "Loaded tube at " + loc);
+                if (DebugFlags.STARTUP_LOAD_LOGGING) {
+                    debug.log("loadAll", "Loaded tube at " + loc);
+                }
 
                 addTube(loc);
             }

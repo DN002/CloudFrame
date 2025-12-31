@@ -9,20 +9,22 @@ import dev.cloudframe.cloudframe.core.CloudFrameEngine;
 import dev.cloudframe.cloudframe.core.CloudFrameRegistry;
 import dev.cloudframe.cloudframe.listeners.ControllerGuiListener;
 import dev.cloudframe.cloudframe.listeners.ControllerListener;
-import dev.cloudframe.cloudframe.listeners.HoverHighlightTask;
+import dev.cloudframe.cloudframe.listeners.UnfinalizedControllerGuiListener;
 import dev.cloudframe.cloudframe.listeners.ItemPacketListener;
-import dev.cloudframe.cloudframe.listeners.ProtocolHoverOutlineTask;
 import dev.cloudframe.cloudframe.listeners.MarkerListener;
 import dev.cloudframe.cloudframe.listeners.TubeListener;
 import dev.cloudframe.cloudframe.listeners.WrenchListener;
 import dev.cloudframe.cloudframe.listeners.InventoryTubeRefreshListener;
 import dev.cloudframe.cloudframe.listeners.ClientSelectionBoxTask;
 import dev.cloudframe.cloudframe.listeners.OccupiedBlockSpaceListener;
+import dev.cloudframe.cloudframe.listeners.FlightBypassListener;
+import dev.cloudframe.cloudframe.listeners.VirtualCollisionListener;
 import dev.cloudframe.cloudframe.storage.Database;
 import dev.cloudframe.cloudframe.util.DebugFile;
 import dev.cloudframe.cloudframe.util.DebugManager;
 import dev.cloudframe.cloudframe.util.RecipeManager;
 import dev.cloudframe.cloudframe.listeners.ResourcePackHandler;
+import dev.cloudframe.cloudframe.listeners.VirtualBlockSpoofPacketInterceptor;
 
 public class CloudFrame extends JavaPlugin {
 
@@ -72,9 +74,12 @@ public class CloudFrame extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new WrenchListener(), this);
         getServer().getPluginManager().registerEvents(new ControllerListener(), this);
         getServer().getPluginManager().registerEvents(new ControllerGuiListener(), this);
+        getServer().getPluginManager().registerEvents(new UnfinalizedControllerGuiListener(), this);
         getServer().getPluginManager().registerEvents(new ItemPacketListener(), this);
         getServer().getPluginManager().registerEvents(new InventoryTubeRefreshListener(), this);
         getServer().getPluginManager().registerEvents(new OccupiedBlockSpaceListener(), this);
+        getServer().getPluginManager().registerEvents(new FlightBypassListener(), this);
+        getServer().getPluginManager().registerEvents(new VirtualCollisionListener(), this);
 
         // Start GUI update task
         ControllerGuiListener.startGuiUpdateTask();
@@ -83,6 +88,9 @@ public class CloudFrame extends JavaPlugin {
         // Vanilla-style selection box for entity-only blocks (tubes/controllers).
         // This avoids particles/glow and matches the normal Minecraft block outline.
         ClientSelectionBoxTask.start(this);
+
+        // Prevent server block updates (AIR) from overwriting our client-side BARRIER spoof.
+        VirtualBlockSpoofPacketInterceptor.startIfAvailable(this);
 
         // Register crafting recipes for plugin items
         RecipeManager.register(this);
@@ -124,6 +132,8 @@ public class CloudFrame extends JavaPlugin {
         ControllerGuiListener.stopGuiUpdateTask();
 
         ClientSelectionBoxTask.stop();
+
+        VirtualBlockSpoofPacketInterceptor.stop();
 
         // Close SQLite connection
         Database.close();

@@ -130,6 +130,14 @@ public class ControllerGuiListener implements Listener {
             return;
         }
 
+        // --- Output routing mode ---
+        if (rawSlot == 8) {
+            boolean next = !q.isOutputRoundRobin();
+            q.setOutputRoundRobin(next);
+            p.sendMessage("§bOutput routing: " + (next ? "§aRound Robin" : "§eFill First"));
+            return;
+        }
+
         // --- Pause Quarry ---
         if (name.contains("Pause")) {
             q.setActive(false);
@@ -162,6 +170,20 @@ public class ControllerGuiListener implements Listener {
         // --- Remove Quarry ---
         if (name.contains("Remove")) {
             p.sendMessage("§4Quarry removed.");
+
+            if (p.getGameMode() != org.bukkit.GameMode.CREATIVE && q.getController() != null && q.getController().getWorld() != null) {
+                if (q.hasSilkTouchAugment()) {
+                    q.getController().getWorld().dropItemNaturally(q.getController(), SilkTouchAugment.create());
+                }
+                int speed = q.getSpeedAugmentLevel();
+                if (speed > 0) {
+                    q.getController().getWorld().dropItemNaturally(q.getController(), SpeedAugment.create(speed));
+                }
+
+                // Also drop the controller item itself.
+                q.getController().getWorld().dropItemNaturally(q.getController(), dev.cloudframe.cloudframe.util.CustomBlocks.controllerDrop());
+            }
+
             dev.cloudframe.cloudframe.core.CloudFrameRegistry.quarries().remove(q);
 
             // Ensure nearby tube visuals update immediately.

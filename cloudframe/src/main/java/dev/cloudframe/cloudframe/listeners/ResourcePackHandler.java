@@ -13,6 +13,7 @@ import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
 import dev.cloudframe.cloudframe.util.Debug;
+import dev.cloudframe.cloudframe.util.DebugFlags;
 import dev.cloudframe.cloudframe.util.DebugManager;
 
 import java.io.BufferedInputStream;
@@ -92,7 +93,9 @@ public class ResourcePackHandler implements Listener {
                 Path base = tmpDir.toPath();
                 Files.walk(base).filter(p -> !Files.isDirectory(p)).forEach(p -> {
                     String relative = base.relativize(p).toString().replace('\\', '/');
-                    debug.log("zip", "Adding to zip: " + relative);
+                    if (DebugFlags.RESOURCE_PACK_VERBOSE_LOGGING) {
+                        debug.log("zip", "Adding to zip: " + relative);
+                    }
                     try {
                         byte[] bytes = Files.readAllBytes(p);
 
@@ -107,7 +110,9 @@ public class ResourcePackHandler implements Listener {
                         // folder name will find the image.
                         if (relative.startsWith("assets/minecraft/textures/items/") && !relative.contains(".mcmeta")) {
                             String alt = relative.replaceFirst("textures/items/", "textures/item/");
-                            debug.log("zip", "Also adding alternate texture path: " + alt);
+                            if (DebugFlags.RESOURCE_PACK_VERBOSE_LOGGING) {
+                                debug.log("zip", "Also adding alternate texture path: " + alt);
+                            }
                             ZipEntry ze2 = new ZipEntry(alt);
                             zos.putNextEntry(ze2);
                             zos.write(bytes);
@@ -126,14 +131,16 @@ public class ResourcePackHandler implements Listener {
             startServer();
 
             // Log zip contents
-            try (java.util.zip.ZipFile zf = new java.util.zip.ZipFile(zipFile)) {
-                var entries = zf.entries();
-                while (entries.hasMoreElements()) {
-                    var e = entries.nextElement();
-                    debug.log("zipContents", "Zip contains: " + e.getName());
+            if (DebugFlags.RESOURCE_PACK_VERBOSE_LOGGING) {
+                try (java.util.zip.ZipFile zf = new java.util.zip.ZipFile(zipFile)) {
+                    var entries = zf.entries();
+                    while (entries.hasMoreElements()) {
+                        var e = entries.nextElement();
+                        debug.log("zipContents", "Zip contains: " + e.getName());
+                    }
+                } catch (IOException ex) {
+                    debug.log("zipContents", "Failed to list zip contents: " + ex.getMessage());
                 }
-            } catch (IOException ex) {
-                debug.log("zipContents", "Failed to list zip contents: " + ex.getMessage());
             }
 
             // Sanity-check critical pack files. If these are missing, textures will never apply.
@@ -141,6 +148,14 @@ public class ResourcePackHandler implements Listener {
 
             // Register listener to push pack on join
             Bukkit.getPluginManager().registerEvents(this, plugin);
+
+            // Also push the pack to currently-online players (useful for /reload or PlugMan reloads).
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                for (Player p : Bukkit.getOnlinePlayers()) {
+                    if (p == null || !p.isOnline()) continue;
+                    sendPack(p, "enable-reload");
+                }
+            }, SEND_DELAY_TICKS);
 
             // cleanup extracted files (keep zip only)
             deleteRecursively(tmpDir.toPath());
@@ -186,9 +201,11 @@ public class ResourcePackHandler implements Listener {
             long reqId = REQUEST_SEQ.incrementAndGet();
             lastRequestByPlayer.put(p.getUniqueId(), new PackRequest(reqId, url, sha1, System.currentTimeMillis()));
 
-            debug.log("sendPack", "id=" + reqId + " reason=" + reason + " player=" + p.getName() + " url=" + url +
+                if (DebugFlags.RESOURCE_PACK_VERBOSE_LOGGING) {
+                debug.log("sendPack", "id=" + reqId + " reason=" + reason + " player=" + p.getName() + " url=" + url +
                     " sha1=" + (sha1 == null ? "<null>" : sha1) +
                     " zip=" + (zipFile == null ? "<null>" : (zipFile.getAbsolutePath() + " size=" + zipFile.length())));
+                }
 
             if (sha1 != null) {
                 p.setResourcePack(url, sha1);
@@ -258,15 +275,19 @@ public class ResourcePackHandler implements Listener {
             Player p = ev.getPlayer();
             PackRequest req = lastRequestByPlayer.get(p.getUniqueId());
             if (req == null) {
-                debug.log("rpStatus", "player=" + p.getName() + " status=" + ev.getStatus() + " (no tracked request)");
+                if (DebugFlags.RESOURCE_PACK_VERBOSE_LOGGING) {
+                    debug.log("rpStatus", "player=" + p.getName() + " status=" + ev.getStatus() + " (no tracked request)");
+                }
                 return;
             }
             long ageMs = Math.max(0, System.currentTimeMillis() - req.sentAtMs());
-            debug.log("rpStatus", "player=" + p.getName() + " status=" + ev.getStatus() +
-                    " reqId=" + req.id() +
-                    " ageMs=" + ageMs +
-                    " sha1=" + (req.sha1() == null ? "<null>" : req.sha1()) +
-                    " url=" + req.url());
+            if (DebugFlags.RESOURCE_PACK_VERBOSE_LOGGING) {
+                debug.log("rpStatus", "player=" + p.getName() + " status=" + ev.getStatus() +
+                        " reqId=" + req.id() +
+                        " ageMs=" + ageMs +
+                        " sha1=" + (req.sha1() == null ? "<null>" : req.sha1()) +
+                        " url=" + req.url());
+            }
         } catch (Exception ex) {
             // keep listener safe
         }
@@ -281,15 +302,19 @@ public class ResourcePackHandler implements Listener {
         server.createContext("/" + ZIP_NAME, new HttpHandler() {
             @Override
             public void handle(HttpExchange exchange) throws IOException {
-                debug.log("serve", "HTTP request: " + exchange.getRequestURI());
+                if (DebugFlags.RESOURCE_PACK_VERBOSE_LOGGING) {
+                    debug.log("serve", "HTTP request: " + exchange.getRequestURI());
+                }
 
                 try {
                     String ua = exchange.getRequestHeaders().getFirst("User-Agent");
                     String range = exchange.getRequestHeaders().getFirst("Range");
                     String ifNoneMatch = exchange.getRequestHeaders().getFirst("If-None-Match");
-                    debug.log("serve", "Headers: ua=" + (ua == null ? "<null>" : ua) +
-                            " range=" + (range == null ? "<null>" : range) +
-                            " if-none-match=" + (ifNoneMatch == null ? "<null>" : ifNoneMatch));
+                    if (DebugFlags.RESOURCE_PACK_VERBOSE_LOGGING) {
+                        debug.log("serve", "Headers: ua=" + (ua == null ? "<null>" : ua) +
+                                " range=" + (range == null ? "<null>" : range) +
+                                " if-none-match=" + (ifNoneMatch == null ? "<null>" : ifNoneMatch));
+                    }
                 } catch (Exception ignored) {}
 
                 if (zipFile == null || !zipFile.exists()) {
@@ -311,7 +336,9 @@ public class ResourcePackHandler implements Listener {
                 try (BufferedInputStream bis = new BufferedInputStream(new FileInputStream(zipFile))) {
                     bis.transferTo(exchange.getResponseBody());
                 }
-                debug.log("serve", "Served ZIP to " + exchange.getRemoteAddress());
+                if (DebugFlags.RESOURCE_PACK_VERBOSE_LOGGING) {
+                    debug.log("serve", "Served ZIP to " + exchange.getRemoteAddress());
+                }
                 exchange.close();
             }
         });
@@ -320,6 +347,7 @@ public class ResourcePackHandler implements Listener {
     }
 
     private void sanityCheckZip(File zip) {
+        if (!DebugFlags.RESOURCE_PACK_VERBOSE_LOGGING) return;
         try (java.util.zip.ZipFile zf = new java.util.zip.ZipFile(zip)) {
             sanityCheckEntry(zf, "pack.mcmeta", true);
 
@@ -384,7 +412,9 @@ public class ResourcePackHandler implements Listener {
 
                         try (InputStream is = jf.getInputStream(je); FileOutputStream fos = new FileOutputStream(out)) {
                             is.transferTo(fos);
-                            debug.log("extract", "Extracted resource: " + rel);
+                            if (DebugFlags.RESOURCE_PACK_VERBOSE_LOGGING) {
+                                debug.log("extract", "Extracted resource: " + rel);
+                            }
                         }
                     }
                 }
@@ -406,7 +436,9 @@ public class ResourcePackHandler implements Listener {
                                     if (out.getParentFile() != null) out.getParentFile().mkdirs();
                                     try (InputStream is = Files.newInputStream(p); FileOutputStream fos = new FileOutputStream(out)) {
                                         is.transferTo(fos);
-                                        debug.log("extract", "Extracted resource: " + rel.toString().replace('\\', '/'));
+                                            if (DebugFlags.RESOURCE_PACK_VERBOSE_LOGGING) {
+                                                debug.log("extract", "Extracted resource: " + rel.toString().replace('\\', '/'));
+                                            }
                                     }
                                 }
                             } catch (IOException ex) {
@@ -428,7 +460,9 @@ public class ResourcePackHandler implements Listener {
                                 if (out.getParentFile() != null) out.getParentFile().mkdirs();
                                 try (InputStream is = jf.getInputStream(je); FileOutputStream fos = new FileOutputStream(out)) {
                                     is.transferTo(fos);
-                                    debug.log("extract", "Extracted resource: " + rel);
+                                    if (DebugFlags.RESOURCE_PACK_VERBOSE_LOGGING) {
+                                        debug.log("extract", "Extracted resource: " + rel);
+                                    }
                                 }
                             }
                         }

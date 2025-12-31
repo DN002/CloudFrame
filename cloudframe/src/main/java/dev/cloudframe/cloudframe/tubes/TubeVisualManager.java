@@ -29,6 +29,7 @@ import org.joml.Vector3f;
 import dev.cloudframe.cloudframe.core.CloudFrameRegistry;
 import dev.cloudframe.cloudframe.util.InventoryUtil;
 import dev.cloudframe.cloudframe.util.Debug;
+import dev.cloudframe.cloudframe.util.DebugFlags;
 import dev.cloudframe.cloudframe.util.DebugManager;
 
 /**
@@ -132,7 +133,9 @@ public final class TubeVisualManager {
     }
 
     public void shutdown() {
-        debug.log("shutdown", "Shutting down tube visuals; trackedTubes=" + entitiesByTube.size() + " interactions=" + interactionByTube.size());
+        if (DebugFlags.VISUAL_SPAWN_LOGGING) {
+            debug.log("shutdown", "Shutting down tube visuals; trackedTubes=" + entitiesByTube.size() + " interactions=" + interactionByTube.size());
+        }
         // Remove all tracked entities
         for (EnumMap<Part, java.util.UUID> map : entitiesByTube.values()) {
             for (var id : map.values()) {
@@ -157,7 +160,7 @@ public final class TubeVisualManager {
             }
         }
 
-        if (removed > 0) {
+        if (removed > 0 && DebugFlags.VISUAL_SPAWN_LOGGING) {
             debug.log(
                 "cleanupChunkDisplays",
                 "Removed " + removed + " tagged tube entities in chunk " + chunk.getWorld().getName() + " " + chunk.getX() + "," + chunk.getZ()
@@ -195,7 +198,7 @@ public final class TubeVisualManager {
     public void updateTube(Location tubeLoc) {
         tubeLoc = norm(tubeLoc);
 
-        if (debug != null) {
+        if (DebugFlags.VISUAL_SPAWN_LOGGING && debug != null) {
             debug.log("updateTube", "Updating tube visuals at " + tubeLoc);
         }
 
@@ -205,7 +208,9 @@ public final class TubeVisualManager {
         }
 
         if (tubeLoc.getWorld() == null || !tubeLoc.getChunk().isLoaded()) {
-            debug.log("updateTube", "Skipping visuals (world/chunk not loaded) at " + tubeLoc);
+            if (DebugFlags.VISUAL_SPAWN_LOGGING) {
+                debug.log("updateTube", "Skipping visuals (world/chunk not loaded) at " + tubeLoc);
+            }
             return;
         }
 
@@ -377,12 +382,19 @@ public final class TubeVisualManager {
         // Make the entity very hard to crosshair-target so the spoofed client-side block
         // can win and render the vanilla selection outline.
         // Interactions are still usable via block-click handlers (selection-box clicks).
-        interaction.setInteractionWidth(0.01f);
-        interaction.setInteractionHeight(0.01f);
+        try {
+            interaction.setInteractionWidth(0.0f);
+            interaction.setInteractionHeight(0.0f);
+        } catch (Throwable ignored) {
+            interaction.setInteractionWidth(0.01f);
+            interaction.setInteractionHeight(0.01f);
+        }
 
         tagTubeEntity(interaction.getPersistentDataContainer(), tubeLoc, "interaction");
 
-        debug.log("spawnInteraction", "Spawned tube interaction id=" + interaction.getUniqueId() + " at " + tubeLoc);
+        if (DebugFlags.VISUAL_SPAWN_LOGGING) {
+            debug.log("spawnInteraction", "Spawned tube interaction id=" + interaction.getUniqueId() + " at " + tubeLoc);
+        }
         return interaction;
     }
 
@@ -407,7 +419,9 @@ public final class TubeVisualManager {
 
         tagTubeEntity(display.getPersistentDataContainer(), tubeLoc, part.name());
 
-        debug.log("spawnPart", "Spawned tube part=" + part + " id=" + display.getUniqueId() + " at " + tubeLoc);
+        if (DebugFlags.VISUAL_SPAWN_LOGGING) {
+            debug.log("spawnPart", "Spawned tube part=" + part + " id=" + display.getUniqueId() + " at " + tubeLoc);
+        }
         return display;
     }
 
@@ -416,10 +430,15 @@ public final class TubeVisualManager {
         // Otherwise the client targets the ItemDisplay instead of the spoofed block,
         // preventing the vanilla block selection outline from appearing.
         try {
-            display.setDisplayWidth(0.01f);
-            display.setDisplayHeight(0.01f);
+            display.setDisplayWidth(0.0f);
+            display.setDisplayHeight(0.0f);
         } catch (Throwable ignored) {
-            // Older API.
+            try {
+                display.setDisplayWidth(0.01f);
+                display.setDisplayHeight(0.01f);
+            } catch (Throwable ignored2) {
+                // Older API.
+            }
         }
 
         // Ensure displays don't camera-billboard (keeps caps/arms facing the right way).

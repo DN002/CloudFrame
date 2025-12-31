@@ -16,8 +16,10 @@ import org.bukkit.util.Vector;
 import dev.cloudframe.cloudframe.core.CloudFrameRegistry;
 import dev.cloudframe.cloudframe.tubes.ItemPacket;
 import dev.cloudframe.cloudframe.tubes.TubeNode;
+import dev.cloudframe.cloudframe.util.InventoryUtil;
 import dev.cloudframe.cloudframe.util.Region;
 import dev.cloudframe.cloudframe.util.Debug;
+import dev.cloudframe.cloudframe.util.DebugFlags;
 import dev.cloudframe.cloudframe.util.DebugManager;
 
 import java.util.ArrayList;
@@ -28,6 +30,16 @@ import java.util.UUID;
 public class Quarry {
 
     private static final Debug debug = DebugManager.get(Quarry.class);
+
+    // 6-direction adjacency vectors
+    private static final Vector[] DIRS = {
+        new Vector(1, 0, 0),
+        new Vector(-1, 0, 0),
+        new Vector(0, 1, 0),
+        new Vector(0, -1, 0),
+        new Vector(0, 0, 1),
+        new Vector(0, 0, -1)
+    };
 
     private final UUID owner;
     private final Location posA;
@@ -66,6 +78,11 @@ public class Quarry {
     // Round-robin output across multiple reachable inventories.
     private int outputInventoryCursor = 0;
 
+    // Output routing mode.
+    // true  => round robin across inventories
+    // false => fill first inventory, then move to next when full
+    private boolean outputRoundRobin = true;
+
     // Mining pacing/FX
     private static final int BASE_MINE_TICKS_PER_BLOCK = 12; // slower default mining speed
     private float mineProgress = 0.0f; // 0..1 crack progress for current block
@@ -98,18 +115,36 @@ public class Quarry {
         this.totalBlocksInRegion = 0;
         this.blocksMined = 0;
 
-        debug.log("constructor", "Created quarry for owner=" + owner +
+        if (DebugFlags.STARTUP_LOAD_LOGGING) {
+            debug.log("constructor", "Created quarry for owner=" + owner +
                 " region=" + region +
             " controller=" + controller +
             " yaw=" + controllerYaw);
+        }
     }
 
     public boolean isActive() {
         return active;
     }
 
+    public boolean isOutputRoundRobin() {
+        return outputRoundRobin;
+    }
+
+    public void setOutputRoundRobin(boolean outputRoundRobin) {
+        boolean changed = this.outputRoundRobin != outputRoundRobin;
+        this.outputRoundRobin = outputRoundRobin;
+
+        // When switching into Fill First, restart from the first (closest) inventory.
+        if (changed && !outputRoundRobin) {
+            this.outputInventoryCursor = 0;
+        }
+    }
+
     public void setActive(boolean active) {
-        debug.log("setActive", "Setting active=" + active);
+        if (DebugFlags.STARTUP_LOAD_LOGGING) {
+            debug.log("setActive", "Setting active=" + active);
+        }
         this.active = active;
 
         if (active) {
@@ -400,16 +435,12 @@ public class Quarry {
 
         if (shouldLog) debug.log("trySendToTube", "Attempting to route item...");
 
-        // Controller must be physically connected to the tube network: require an adjacent tube.
-        final Vector[] DIRS = new Vector[] {
-            new Vector(1, 0, 0),
-            new Vector(-1, 0, 0),
-            new Vector(0, 1, 0),
-            new Vector(0, -1, 0),
-            new Vector(0, 0, 1),
-            new Vector(0, 0, -1)
-        };
+        // Fast-path: if an inventory is adjacent to the controller, insert directly (no tubes needed).
+        if (trySendToAdjacentInventory(shouldLog)) {
+            return;
+        }
 
+        // Controller must be physically connected to the tube network: require an adjacent tube.
         TubeNode startTube = null;
         for (Vector v : DIRS) {
             TubeNode node = CloudFrameRegistry.tubes().getTube(controller.clone().add(v));
@@ -427,24 +458,38 @@ public class Quarry {
         List<Location> inventories = CloudFrameRegistry.tubes().findInventoriesNear(startTube);
         if (inventories.isEmpty()) return;
 
-        // Stable ordering so round-robin is predictable.
+        // Stable ordering: closest inventories first.
         inventories = new java.util.ArrayList<>(inventories);
         inventories.sort(
             Comparator
-                .comparingInt(Location::getBlockX)
+                .comparingDouble((Location l) -> l.distanceSquared(controller))
+                .thenComparingInt(Location::getBlockX)
                 .thenComparingInt(Location::getBlockY)
                 .thenComparingInt(Location::getBlockZ)
         );
 
-        int startIndex = 0;
-        if (!inventories.isEmpty()) {
-            startIndex = Math.floorMod(outputInventoryCursor, inventories.size());
+        int startIndex;
+        if (outputRoundRobin) {
+            startIndex = inventories.isEmpty() ? 0 : Math.floorMod(outputInventoryCursor, inventories.size());
+        } else {
+            // Fill First always starts from the closest inventory each time.
+            startIndex = 0;
         }
 
-        // Route to inventories in round-robin order.
+        ItemStack peek = outputBuffer.get(0);
+
+        // Route to inventories.
+        // - Round robin: start from cursor, skip full inventories, advance after sending.
+        // - Fill first: always pick the closest inventory that has space.
         for (int attempt = 0; attempt < inventories.size(); attempt++) {
             int idx = (startIndex + attempt) % inventories.size();
             Location invLoc = inventories.get(idx);
+
+            // Don't route into inventories that cannot accept the item.
+            // This keeps both modes from targeting full destinations.
+            if (!hasSpaceFor(invLoc, peek)) {
+                continue;
+            }
 
             // Find the tube that touches this inventory.
             TubeNode destTube = null;
@@ -507,10 +552,81 @@ public class Quarry {
 
             CloudFrameRegistry.packets().add(new ItemPacket(item, points, invLoc));
 
-            // Advance cursor to the next inventory after the one we just used.
-            outputInventoryCursor = idx + 1;
+            // Advance cursor.
+            if (outputRoundRobin) {
+                // Next inventory after the one we just used.
+                outputInventoryCursor = idx + 1;
+            } else {
+                // Keep starting at the closest (index 0) each time.
+                outputInventoryCursor = 0;
+            }
             return;
         }
+    }
+
+    private boolean trySendToAdjacentInventory(boolean shouldLog) {
+        if (outputBuffer.isEmpty()) return false;
+        if (controller == null || controller.getWorld() == null) return false;
+
+        ItemStack peek = outputBuffer.get(0);
+
+        for (Vector v : DIRS) {
+            Location invLoc = controller.clone().add(v);
+            if (invLoc.getWorld() == null) continue;
+
+            // Only treat actual inventory blocks as direct outputs.
+            if (!InventoryUtil.isInventory(invLoc.getBlock())) continue;
+
+            // Skip full inventories.
+            if (!hasSpaceFor(invLoc, peek)) continue;
+
+            var holder = InventoryUtil.getInventory(invLoc.getBlock());
+            if (holder == null || holder.getInventory() == null) continue;
+
+            ItemStack item = outputBuffer.get(0);
+            var leftovers = holder.getInventory().addItem(item);
+
+            if (leftovers == null || leftovers.isEmpty()) {
+                outputBuffer.remove(0);
+            } else {
+                // Keep the remaining stack in the buffer to retry later.
+                ItemStack remaining = leftovers.values().iterator().next();
+                outputBuffer.set(0, remaining);
+            }
+
+            if (shouldLog) {
+                debug.log("trySendToAdjacentInventory", "Inserted into adjacent inventory at " + invLoc);
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    private static boolean hasSpaceFor(Location inventoryLoc, ItemStack stack) {
+        if (inventoryLoc == null || inventoryLoc.getWorld() == null) return false;
+        if (stack == null || stack.getType().isAir()) return true;
+
+        var holder = dev.cloudframe.cloudframe.util.InventoryUtil.getInventory(inventoryLoc.getBlock());
+        if (holder == null) return false;
+        var inv = holder.getInventory();
+        if (inv == null) return false;
+
+        int remaining = stack.getAmount();
+        int max = stack.getMaxStackSize();
+
+        ItemStack[] contents = inv.getStorageContents();
+        for (ItemStack it : contents) {
+            if (it == null || it.getType().isAir()) {
+                return true;
+            }
+            if (!it.isSimilar(stack)) continue;
+            int space = Math.max(0, max - it.getAmount());
+            remaining -= space;
+            if (remaining <= 0) return true;
+        }
+
+        return false;
     }
 
     /**
@@ -519,16 +635,17 @@ public class Quarry {
      */
     public boolean hasValidOutput() {
         if (controller == null || controller.getWorld() == null) return false;
-        if (CloudFrameRegistry.tubes() == null) return false;
 
-        final Vector[] DIRS = new Vector[] {
-            new Vector(1, 0, 0),
-            new Vector(-1, 0, 0),
-            new Vector(0, 1, 0),
-            new Vector(0, -1, 0),
-            new Vector(0, 0, 1),
-            new Vector(0, 0, -1)
-        };
+        // Direct output: an inventory adjacent to the controller counts as a valid output.
+        for (Vector v : DIRS) {
+            Location adj = controller.clone().add(v);
+            if (adj.getWorld() == null) continue;
+            if (InventoryUtil.isInventory(adj.getBlock())) {
+                return true;
+            }
+        }
+
+        if (CloudFrameRegistry.tubes() == null) return false;
 
         TubeNode startTube = null;
         for (Vector v : DIRS) {

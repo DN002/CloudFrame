@@ -8,6 +8,7 @@ import org.bukkit.event.world.ChunkUnloadEvent;
 
 import dev.cloudframe.cloudframe.tubes.TubeNetworkManager;
 import dev.cloudframe.cloudframe.util.Debug;
+import dev.cloudframe.cloudframe.util.DebugFlags;
 import dev.cloudframe.cloudframe.util.DebugManager;
 
 public class TubeVisualChunkListener implements Listener {
@@ -38,6 +39,8 @@ public class TubeVisualChunkListener implements Listener {
             tubeManager.visualsManager().updateTube(loc);
         }
 
-        debug.log("chunkLoad", "Refreshed tube displays for chunk " + chunk.getWorld().getName() + " " + chunk.getX() + "," + chunk.getZ());
+        if (DebugFlags.CHUNK_LOGGING) {
+            debug.log("chunkLoad", "Refreshed tube displays for chunk " + chunk.getWorld().getName() + " " + chunk.getX() + "," + chunk.getZ());
+        }
     }
 }

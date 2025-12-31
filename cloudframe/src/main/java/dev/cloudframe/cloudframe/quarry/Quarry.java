@@ -24,7 +24,9 @@ import dev.cloudframe.cloudframe.util.DebugManager;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public class Quarry {
@@ -82,6 +84,11 @@ public class Quarry {
     // true  => round robin across inventories
     // false => fill first inventory, then move to next when full
     private boolean outputRoundRobin = true;
+
+    // Track in-flight items to prevent overfilling inventories.
+    // Key: inventory location, Value: total amount of items traveling to that inventory.
+    private final Map<String, Integer> inFlightByDestination = new HashMap<>();
+    private long tickCounter = 0;
 
     // Mining pacing/FX
     private static final int BASE_MINE_TICKS_PER_BLOCK = 12; // slower default mining speed
@@ -264,6 +271,12 @@ public class Quarry {
     }
 
     public void tick(boolean shouldLog) {
+        tickCounter++;
+
+        if (shouldLog) {
+            debug.log("tick", "Quarry tick for owner=" + owner);
+        }
+
         if (!isChunkLoaded()) return;
         if (!active) return;
 
@@ -485,9 +498,9 @@ public class Quarry {
             int idx = (startIndex + attempt) % inventories.size();
             Location invLoc = inventories.get(idx);
 
-            // Don't route into inventories that cannot accept the item.
+            // Don't route into inventories that cannot accept the item (accounting for in-flight items).
             // This keeps both modes from targeting full destinations.
-            if (!hasSpaceFor(invLoc, peek)) {
+            if (!hasSpaceFor(invLoc, peek, inFlightByDestination)) {
                 continue;
             }
 
@@ -504,8 +517,6 @@ public class Quarry {
 
             List<TubeNode> path = CloudFrameRegistry.tubes().findPath(startTube, destTube);
             if (path == null) continue;
-
-            ItemStack item = outputBuffer.remove(0);
 
             // Add endpoints so the packet is visible in the short segments:
             // controller -> first tube ... last tube -> inventory.
@@ -550,7 +561,14 @@ public class Quarry {
             points.add(lastTubeFace);
             points.add(invFace);
 
-            CloudFrameRegistry.packets().add(new ItemPacket(item, points, invLoc));
+            ItemStack item = outputBuffer.remove(0);
+
+            // Track this item as in-flight to prevent overfilling the destination.
+            String destKey = locationKey(invLoc);
+            inFlightByDestination.merge(destKey, item.getAmount(), Integer::sum);
+
+            // Create packet with delivery callback to decrement in-flight tracking.
+            CloudFrameRegistry.packets().add(new ItemPacket(item, points, invLoc, this::onItemDelivered));
 
             // Advance cursor.
             if (outputRoundRobin) {
@@ -577,8 +595,8 @@ public class Quarry {
             // Only treat actual inventory blocks as direct outputs.
             if (!InventoryUtil.isInventory(invLoc.getBlock())) continue;
 
-            // Skip full inventories.
-            if (!hasSpaceFor(invLoc, peek)) continue;
+            // Skip full inventories (accounting for in-flight items).
+            if (!hasSpaceFor(invLoc, peek, inFlightByDestination)) continue;
 
             var holder = InventoryUtil.getInventory(invLoc.getBlock());
             if (holder == null || holder.getInventory() == null) continue;
@@ -588,6 +606,7 @@ public class Quarry {
 
             if (leftovers == null || leftovers.isEmpty()) {
                 outputBuffer.remove(0);
+                // No need to track in-flight for adjacent (instant delivery).
             } else {
                 // Keep the remaining stack in the buffer to retry later.
                 ItemStack remaining = leftovers.values().iterator().next();
@@ -603,7 +622,7 @@ public class Quarry {
         return false;
     }
 
-    private static boolean hasSpaceFor(Location inventoryLoc, ItemStack stack) {
+    private static boolean hasSpaceFor(Location inventoryLoc, ItemStack stack, Map<String, Integer> inFlightByDest) {
         if (inventoryLoc == null || inventoryLoc.getWorld() == null) return false;
         if (stack == null || stack.getType().isAir()) return true;
 
@@ -615,10 +634,18 @@ public class Quarry {
         int remaining = stack.getAmount();
         int max = stack.getMaxStackSize();
 
+        // Account for items already in-flight to this destination.
+        String destKey = locationKey(inventoryLoc);
+        int inFlight = inFlightByDest.getOrDefault(destKey, 0);
+        remaining += inFlight;
+
         ItemStack[] contents = inv.getStorageContents();
         for (ItemStack it : contents) {
             if (it == null || it.getType().isAir()) {
-                return true;
+                // Empty slot: can hold one full stack.
+                remaining -= max;
+                if (remaining <= 0) return true;
+                continue;
             }
             if (!it.isSimilar(stack)) continue;
             int space = Math.max(0, max - it.getAmount());
@@ -627,6 +654,25 @@ public class Quarry {
         }
 
         return false;
+    }
+
+    private static String locationKey(Location loc) {
+        if (loc == null || loc.getWorld() == null) return "null";
+        return loc.getWorld().getName() + ":" + loc.getBlockX() + "," + loc.getBlockY() + "," + loc.getBlockZ();
+    }
+
+    /**
+     * Callback invoked when an item packet is delivered to an inventory.
+     * Decrements the in-flight tracking for that destination.
+     */
+    private void onItemDelivered(Location destination, int deliveredAmount) {
+        if (destination == null) return;
+        String destKey = locationKey(destination);
+        inFlightByDestination.compute(destKey, (k, current) -> {
+            if (current == null) return null;
+            int remaining = current - deliveredAmount;
+            return remaining > 0 ? remaining : null;
+        });
     }
 
     /**

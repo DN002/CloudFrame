@@ -88,12 +88,18 @@ public class ItemPacketManager {
 
             var holder = InventoryUtil.getInventory(destInvLoc.getBlock());
             if (holder != null) {
+                int deliveredAmount = p.getItem().getAmount();
                 var leftovers = holder.getInventory().addItem(p.getItem());
                 // If full, drop leftovers.
                 if (!leftovers.isEmpty()) {
                     for (var stack : leftovers.values()) {
                         destInvLoc.getWorld().dropItemNaturally(destInvLoc.clone().add(0.5, 1, 0.5), stack);
+                        deliveredAmount -= stack.getAmount();
                     }
+                }
+                // Notify callback of delivery (even if partial).
+                if (p.getOnDeliveryCallback() != null) {
+                    p.getOnDeliveryCallback().accept(destInvLoc, deliveredAmount);
                 }
                 return;
             }

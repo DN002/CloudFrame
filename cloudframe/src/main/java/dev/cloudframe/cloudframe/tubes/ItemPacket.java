@@ -13,6 +13,7 @@ import org.joml.Vector3f;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.BiConsumer;
 
 import dev.cloudframe.cloudframe.util.Debug;
 import dev.cloudframe.cloudframe.util.DebugManager;
@@ -24,6 +25,7 @@ public class ItemPacket {
     private final ItemStack item;
     private final List<Location> waypoints;
     private final Location destinationInventory; // nullable
+    private final BiConsumer<Location, Integer> onDeliveryCallback; // nullable
 
     private int currentIndex = 0;
     private double progress = 0.0;
@@ -33,13 +35,18 @@ public class ItemPacket {
     private ItemDisplay entity; // visual packet entity
 
     public ItemPacket(ItemStack item, List<TubeNode> path) {
-        this(item, toWaypoints(path), null);
+        this(item, toWaypoints(path), null, null);
     }
 
     public ItemPacket(ItemStack item, List<Location> waypoints, Location destinationInventory) {
+        this(item, waypoints, destinationInventory, null);
+    }
+
+    public ItemPacket(ItemStack item, List<Location> waypoints, Location destinationInventory, BiConsumer<Location, Integer> onDeliveryCallback) {
         this.item = item;
         this.waypoints = List.copyOf(waypoints);
         this.destinationInventory = destinationInventory;
+        this.onDeliveryCallback = onDeliveryCallback;
 
         if (this.waypoints.size() < 2) {
             throw new IllegalArgumentException("ItemPacket requires at least 2 waypoints");
@@ -201,5 +208,9 @@ public class ItemPacket {
 
     public double getProgress() {
         return progress;
+    }
+
+    public BiConsumer<Location, Integer> getOnDeliveryCallback() {
+        return onDeliveryCallback;
     }
 }

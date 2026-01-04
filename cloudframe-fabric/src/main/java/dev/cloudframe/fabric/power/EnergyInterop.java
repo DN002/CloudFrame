@@ -126,6 +126,33 @@ public final class EnergyInterop {
         }
     }
 
+    public record ExternalEnergyInfo(long storedCfe, long capacityCfe) {
+    }
+
+    /**
+     * Best-effort read-only measurement of external energy storage adjacent to a cable.
+     * This should NOT consume energy.
+     */
+    public static ExternalEnergyInfo tryMeasureExternalCfe(ServerWorld world, BlockPos externalPos, Direction side) {
+        if (!TR_PRESENT) return null;
+        if (world == null || externalPos == null) return null;
+
+        try {
+            Object storage = findTrEnergyStorage(world, externalPos, side);
+            if (storage == null) return null;
+
+            long storedExternal = invokeLongGetter(storage, "getAmount", "getStored", "getEnergy");
+            long capacityExternal = invokeLongGetter(storage, "getCapacity", "getMaxAmount", "getMaxEnergy");
+
+            long stored = Math.max(0L, storedExternal) * EXTERNAL_ENERGY_TO_CFE;
+            long capacity = Math.max(0L, capacityExternal) * EXTERNAL_ENERGY_TO_CFE;
+
+            return new ExternalEnergyInfo(stored, capacity);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     private static Object findTrEnergyStorage(ServerWorld world, BlockPos pos, Direction side) throws Exception {
         Class<?> energyStorageClass = Class.forName(TR_ENERGY_STORAGE_CLASS);
         Object sidedLookup = getStaticField(energyStorageClass, "SIDED");
@@ -182,6 +209,24 @@ public final class EnergyInterop {
             }
             if (p.length == 1 && p[0] == long.class) {
                 return (long) m.invoke(storage, amount);
+            }
+        }
+        return 0L;
+    }
+
+    private static long invokeLongGetter(Object storage, String... methodNames) {
+        if (storage == null || methodNames == null) return 0L;
+        for (String name : methodNames) {
+            if (name == null) continue;
+            for (Method m : storage.getClass().getMethods()) {
+                if (!m.getName().equals(name)) continue;
+                if (m.getParameterCount() != 0) continue;
+                if (m.getReturnType() != long.class) continue;
+                try {
+                    return (long) m.invoke(storage);
+                } catch (Throwable t) {
+                    // try next
+                }
             }
         }
         return 0L;

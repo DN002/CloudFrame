@@ -19,8 +19,11 @@ import net.minecraft.util.math.GlobalPos;
 import net.minecraft.util.ItemScatterer;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
+import net.minecraft.server.MinecraftServer;
 
 public class QuarryControllerScreenHandler extends ScreenHandler {
+
+    private static final int ENERGY_PER_BLOCK_CFE = 480;
 
     private static final int UI_ROWS = 3;
 
@@ -165,10 +168,7 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
                     }
                     case 6 -> {
                         if (q == null) yield 0;
-                        long total = Math.max(0L, (long) q.getTotalBlocksInRegion());
-                        long mined = Math.max(0L, (long) q.getBlocksMined());
-                        long remaining = Math.max(0L, total - mined);
-                        yield remaining > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) remaining;
+                        yield q.getRemainingBlocksEstimate();
                     }
                     case 7 -> (q != null && q.hasValidOutput()) ? 1 : 0;
                     case 8 -> (q != null && q.isRedstonePowered()) ? 1 : 0;
@@ -184,13 +184,34 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
                     case 22 -> (q != null && q.isPowerBlocked()) ? 1 : 0;
                     case 23 -> {
                         if (q == null) yield 0;
-                        long v = Math.max(0L, q.getPowerRequiredCfePerTick());
+                        // Power using should reflect actual quarry operation.
+                        // If paused/off, it uses 0 CFE/t.
+                        long v = q.isActive() ? Math.max(0L, q.getPowerRequiredCfePerTick()) : 0L;
                         yield v > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) v;
                     }
                     case 24 -> {
                         if (q == null) yield 0;
-                        long v = Math.max(0L, q.getPowerReceivedCfePerTick());
-                        yield v > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) v;
+
+                        long v;
+                        if (q.isActive()) {
+                            // Active: show the actual per-tick draw that was consumed.
+                            v = Math.max(0L, q.getPowerReceivedCfePerTick());
+                        } else {
+                            // Paused/off: show available generation on the cable network.
+                            MinecraftServer srv = null;
+                            if (be != null && be.getWorld() instanceof ServerWorld sw) {
+                                srv = sw.getServer();
+                            }
+
+                            if (srv == null) {
+                                v = 0L;
+                            } else {
+                                var info = dev.cloudframe.fabric.power.FabricPowerNetworkManager.measureNetwork(srv, controllerLoc());
+                                v = Math.max(0L, info.producedCfePerTick());
+                            }
+                        }
+
+                        yield v > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) Math.max(0L, v);
                     }
                     case 25 -> controllerPos.getX();
                     case 26 -> controllerPos.getY();
@@ -217,6 +238,17 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
 
         addAugmentSlots();
         addPlayerSlots(inv);
+    }
+
+    private static long theoreticalRequiredCfePerTick(int speedTier) {
+        int tpb = switch (speedTier) {
+            case 1 -> 8;
+            case 2 -> 6;
+            case 3 -> 5;
+            default -> 12;
+        };
+        if (tpb <= 0) tpb = 1;
+        return (ENERGY_PER_BLOCK_CFE + (long) tpb - 1L) / (long) tpb;
     }
 
     private Object controllerLoc() {
@@ -365,20 +397,28 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
         switch (id) {
             // Lever: toggle quarry on/off
             case 0 -> {
-                if (q != null) {
-                    if (!q.isActive() && !q.hasValidOutput()) {
-                        return true;
-                    }
-
-                    boolean newActive = !q.isActive();
-                    q.setActive(newActive);
-
-                    if (inst != null && inst.getQuarryManager() != null) {
-                        inst.getQuarryManager().saveAll();
-                    }
+                if (q == null) {
+                    player.sendMessage(Text.literal("Unregistered: use the Wrench to register this controller").formatted(net.minecraft.util.Formatting.YELLOW), false);
                     return true;
                 }
-                return false;
+
+                // Starting requires valid output; otherwise stay paused.
+                if (!q.isActive() && !q.hasValidOutput()) {
+                    player.sendMessage(Text.literal("Cannot start: output not connected").formatted(net.minecraft.util.Formatting.RED), false);
+                    return true;
+                }
+
+                boolean newActive = !q.isActive();
+                q.setActive(newActive);
+
+                // Manual lever control should not be immediately overridden by an automated redstone mode.
+                // Comparator can be used to re-enable redstone gating.
+                q.setRedstoneMode(0);
+
+                if (inst != null && inst.getQuarryManager() != null) {
+                    inst.getQuarryManager().saveAll();
+                }
+                return true;
             }
 
             // Comparator: cycle redstone mode

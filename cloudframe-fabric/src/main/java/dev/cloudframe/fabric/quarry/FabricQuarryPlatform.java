@@ -369,8 +369,10 @@ public class FabricQuarryPlatform implements QuarryPlatform {
         ServerWorld world = worldOf(null, loc);
         BlockState state = world.getBlockState(pos);
         Block block = state.getBlock();
-        // Never mine the glass perimeter frame (or any glass) so the boundary stays intact.
-        if (block == Blocks.AIR || block == Blocks.BEDROCK || block == Blocks.GLASS) return false;
+        // Never mine air/bedrock. Glass is mineable; the common-layer quarry logic prevents
+        // mining the glass *frame ring* specifically so players can place glass inside the
+        // mined area and have it removed.
+        if (block == Blocks.AIR || block == Blocks.BEDROCK) return false;
         return state.isSolid() || block == Blocks.WATER || block == Blocks.LAVA;
     }
 

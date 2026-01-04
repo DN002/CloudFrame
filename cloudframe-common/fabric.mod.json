@@ -22,8 +22,16 @@
     ]
   },
   "depends": {
-    "fabricloader": ">=0.16.0",
+    "fabricloader": "\u003e\u003d0.16.0",
     "fabric-api": "*",
     "minecraft": "~1.21.1"
-  }
+  },
+  "jars": [
+    {
+      "file": "META-INF/jars/cloudframe-common-2.0.0.jar"
+    },
+    {
+      "file": "META-INF/jars/sqlite-jdbc-3.46.0.0.jar"
+    }
+  ]
 }

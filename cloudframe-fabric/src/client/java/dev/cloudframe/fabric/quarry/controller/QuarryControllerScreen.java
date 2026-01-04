@@ -25,9 +25,31 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
     private static final int SLOT_SILK_X = 8 + 2 * 18;
     private static final int SLOT_SPEED_X = 8 + 3 * 18;
     private static final int SLOT_BARRIER_X = 8 + 4 * 18;
-    private static final int SLOT_CFE_POWER_X = 8 + 6 * 18;
     private static final int SLOT_POWER_X = 8 + 7 * 18;
     private static final int SLOT_HOPPER_X = 8 + 8 * 18;
+
+    // Power bar placement (title row)
+    private static final int TITLE_TEXT_X = 8;
+    private static final int TITLE_TEXT_Y = 6;
+    private static final int TITLE_BAR_GAP = 6;
+    private static final int TITLE_BAR_MARGIN_RIGHT = 8;
+    private static final int TITLE_BAR_H = 8;
+
+    // Cached title-row power bar bounds for hover tooltip
+    private int powerBarHoverX;
+    private int powerBarHoverY;
+    private int powerBarHoverW;
+    private int powerBarHoverH;
+
+    // Power bar animation (client-side smoothing)
+    private static final double POWER_RAMP_SECONDS = 20.0; // how long 0 -> 100% should take when toggling on
+    private static final double POWER_RAMP_TICKS = 20.0 * POWER_RAMP_SECONDS;
+    private static final double POWER_FILL_RISE_STEP = 1.0 / POWER_RAMP_TICKS;
+
+    private double animatedPowerFillRatio = 0.0;
+    private double animatedPowerUsingCfePerTick = 0.0;
+    private boolean lastPowerActive = false;
+    private int lastQuarryState = Integer.MIN_VALUE;
 
     // Slot positions (row 1)
     private static final int SLOT_CHUNK_PREVIEW_X = 8 + 6 * 18;
@@ -44,6 +66,79 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
     @Override
     protected void init() {
         super.init();
+    }
+
+    private void updatePowerAnimationOneTick() {
+        if (!handler.hasRegisteredQuarry()) {
+            animatedPowerFillRatio = 0.0;
+            animatedPowerUsingCfePerTick = 0.0;
+            lastPowerActive = false;
+            lastQuarryState = 0;
+            return;
+        }
+
+        int quarryState = handler.getQuarryState();
+        int targetRequired = Math.max(0, handler.getPowerRequiredCfePerTick());
+        int targetReceived = Math.max(0, handler.getPowerReceivedCfePerTick());
+
+        boolean activeNow = targetRequired > 0;
+
+        // First tick after opening the screen: if the quarry is already active,
+        // initialize immediately to the current values (no ramp-from-zero).
+        if (lastQuarryState == Integer.MIN_VALUE) {
+            if (activeNow) {
+                double initFill = Math.min(1.0, Math.max(0.0, (double) targetReceived / (double) targetRequired));
+                animatedPowerFillRatio = initFill;
+                animatedPowerUsingCfePerTick = (double) targetRequired;
+                lastPowerActive = true;
+            } else {
+                animatedPowerFillRatio = 0.0;
+                animatedPowerUsingCfePerTick = 0.0;
+                lastPowerActive = false;
+            }
+            lastQuarryState = quarryState;
+            return;
+        }
+
+        // Only force a visible ramp-up when the quarry transitions from paused->active
+        // while the screen is open (i.e., the user actually toggled it on).
+        boolean wasActive = lastPowerActive;
+        if (activeNow && !wasActive && (lastQuarryState == 1 || lastQuarryState == 0)) {
+            animatedPowerFillRatio = 0.0;
+            animatedPowerUsingCfePerTick = 0.0;
+        }
+
+        lastQuarryState = quarryState;
+
+        lastPowerActive = activeNow;
+
+        double targetFill = 0.0;
+        if (targetRequired > 0) {
+            targetFill = Math.min(1.0, Math.max(0.0, (double) targetReceived / (double) targetRequired));
+        }
+
+        // Ramp both directions to emulate power rising/falling.
+        if (targetFill > animatedPowerFillRatio) {
+            animatedPowerFillRatio = Math.min(targetFill, animatedPowerFillRatio + POWER_FILL_RISE_STEP);
+        } else if (targetFill < animatedPowerFillRatio) {
+            animatedPowerFillRatio = Math.max(targetFill, animatedPowerFillRatio - POWER_FILL_RISE_STEP);
+        }
+
+        if (targetRequired > animatedPowerUsingCfePerTick) {
+            double stepUp = Math.max(1.0, (double) targetRequired / POWER_RAMP_TICKS);
+            animatedPowerUsingCfePerTick = Math.min((double) targetRequired, animatedPowerUsingCfePerTick + stepUp);
+        } else if (targetRequired < animatedPowerUsingCfePerTick) {
+            double stepDown = Math.max(1.0, animatedPowerUsingCfePerTick / POWER_RAMP_TICKS);
+            animatedPowerUsingCfePerTick = Math.max((double) targetRequired, animatedPowerUsingCfePerTick - stepDown);
+        }
+    }
+
+    /**
+     * Driven from Fabric's client tick event to ensure animation progresses even
+     * when render timing is odd or player age isn't advancing as expected.
+     */
+    public void onClientTick() {
+        updatePowerAnimationOneTick();
     }
 
     @Override
@@ -70,6 +165,9 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
             }
         }
 
+        // Power bar: driven by received/required CFE/t. Render beside the title.
+        drawPowerBarTitleRow(context);
+
         // Draw old-style icon widgets in top grid slots.
         drawIcon(context, new ItemStack(Items.REDSTONE_TORCH), SLOT_REDSTONE_TORCH_X, SLOT_ROW0_Y);
         drawIcon(context, new ItemStack(Items.LEVER), SLOT_LEVER_X, SLOT_ROW0_Y);
@@ -81,9 +179,6 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
         if (!powered) {
             drawDisabledOverlay(context, SLOT_POWER_X, SLOT_ROW0_Y);
         }
-
-        // Dedicated power widget (placeholder): redstone dust.
-        drawIcon(context, new ItemStack(Items.REDSTONE), SLOT_CFE_POWER_X, SLOT_ROW0_Y);
 
         // Routing toggle: hopper icon.
         drawIcon(context, new ItemStack(Items.HOPPER), SLOT_HOPPER_X, SLOT_ROW0_Y);
@@ -109,9 +204,85 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
         this.drawMouseoverTooltip(context, mouseX, mouseY);
     }
 
+    private void drawPowerBarTitleRow(DrawContext context) {
+        // Draw to the right of the title text, filling the empty header space.
+        int titleWidth = this.textRenderer.getWidth(this.title);
+        int relX = TITLE_TEXT_X + titleWidth + TITLE_BAR_GAP;
+        int relY = TITLE_TEXT_Y;
+
+        int w = (this.backgroundWidth - TITLE_BAR_MARGIN_RIGHT) - relX;
+        if (w < 24) {
+            // If the title is too long for the header bar, right-align a minimal bar.
+            w = 48;
+            relX = this.backgroundWidth - TITLE_BAR_MARGIN_RIGHT - w;
+        }
+
+        // Center vertically relative to the title baseline.
+        int x0 = this.x + relX;
+        int y0 = this.y + relY;
+        int h = TITLE_BAR_H;
+
+        // Cache for hover tooltip detection.
+        this.powerBarHoverX = relX;
+        this.powerBarHoverY = relY;
+        this.powerBarHoverW = w;
+        this.powerBarHoverH = h;
+
+        // Border
+        int border = 0xFF000000;
+        context.fill(x0 - 1, y0 - 1, x0 + w + 1, y0, border);
+        context.fill(x0 - 1, y0 + h, x0 + w + 1, y0 + h + 1, border);
+        context.fill(x0 - 1, y0, x0, y0 + h, border);
+        context.fill(x0 + w, y0, x0 + w + 1, y0 + h, border);
+
+        // Background
+        context.fill(x0, y0, x0 + w, y0 + h, 0xFF2B2B2B);
+
+        if (!handler.hasRegisteredQuarry()) {
+            // Unregistered: no fill.
+            drawPowerBarTicks(context, x0, y0, w, h);
+            return;
+        }
+
+        int required = Math.max(0, handler.getPowerRequiredCfePerTick());
+
+        float ratio = (float) Math.min(1.0, Math.max(0.0, animatedPowerFillRatio));
+        int fillW = Math.max(0, Math.min(w, Math.round(ratio * (float) w)));
+
+        // Fill color: always light red as requested for power readouts.
+        int fill = 0xFFCC5555;
+        if (fillW > 0) {
+            context.fill(x0, y0, x0 + fillW, y0 + h, fill);
+        }
+
+        // If power is blocked (insufficient), add a subtle overlay to indicate the bar is not "good".
+        if (required > 0 && handler.isPowerBlocked()) {
+            context.fill(x0, y0, x0 + w, y0 + h, 0x40800000);
+        }
+
+        drawPowerBarTicks(context, x0, y0, w, h);
+    }
+
+    private void drawPowerBarTicks(DrawContext context, int x0, int y0, int w, int h) {
+        // Denser ticks: 0..100% in 10% steps (major at 0/50/100).
+        int tick = 0xFFB0B0B0;
+        for (int i = 0; i <= 10; i++) {
+            // Don't draw ticks on the outer edges; keep borders clean and symmetric.
+            if (i == 0 || i == 10) continue;
+
+            int x = x0 + Math.round(((float) w * (float) i) / 10.0f);
+            if (x <= x0) x = x0 + 1;
+            if (x >= x0 + w) x = x0 + w - 1;
+            boolean major = (i == 5);
+            int tickH = major ? h : Math.max(2, h - 2);
+            int yStart = major ? y0 : (y0 + 1);
+            context.fill(x, yStart, x + 1, yStart + tickH, tick);
+        }
+    }
+
     private static boolean isWidgetSlot(int row, int col) {
         if (row == 0) {
-            return col == 0 || col == 1 || col == 2 || col == 3 || col == 4 || col == 6 || col == 7 || col == 8;
+            return col == 0 || col == 1 || col == 2 || col == 3 || col == 4 || col == 7 || col == 8;
         }
         if (row == 1) {
             return col == 6 || col == 7 || col == 8;
@@ -162,9 +333,45 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
         return relX >= slotRelX && relX < slotRelX + 16 && relY >= slotRelY && relY < slotRelY + 16;
     }
 
+    private boolean isHoveringRect(int relX, int relY, int rectRelX, int rectRelY, int w, int h) {
+        return relX >= rectRelX && relX < rectRelX + w && relY >= rectRelY && relY < rectRelY + h;
+    }
+
     private void drawIconTooltips(DrawContext context, int mouseX, int mouseY) {
         int relX = mouseX - this.x;
         int relY = mouseY - this.y;
+
+        // Power bar tooltip (title row)
+        if (isHoveringRect(relX, relY, powerBarHoverX, powerBarHoverY, powerBarHoverW, powerBarHoverH)) {
+            java.util.List<Text> lines = new java.util.ArrayList<>();
+            lines.add(Text.literal("Power").formatted(Formatting.WHITE));
+
+            if (!handler.hasRegisteredQuarry()) {
+                lines.add(Text.literal("N/A (unregistered)").formatted(Formatting.YELLOW));
+                lines.add(Text.literal("Register the controller first").formatted(Formatting.GRAY));
+            } else {
+                int required = Math.max(0, handler.getPowerRequiredCfePerTick());
+                int received = Math.max(0, handler.getPowerReceivedCfePerTick());
+
+                int animatedUsing = Math.max(0, (int) Math.round(animatedPowerUsingCfePerTick));
+
+                lines.add(Text.literal("Power using: " + animatedUsing + " CFE/t").formatted(Formatting.RED));
+                lines.add(Text.literal("Power receiving: " + received + " CFE/t").formatted(Formatting.RED));
+
+                if (required > 0) {
+                    lines.add(Text.literal("Power: " + received + "/" + required + " CFE/t").formatted(Formatting.RED));
+                } else {
+                    lines.add(Text.literal("Power: Paused").formatted(Formatting.GRAY));
+                }
+
+                if (handler.isPowerBlocked()) {
+                    lines.add(Text.literal("Insufficient Power").formatted(Formatting.RED));
+                }
+            }
+
+            context.drawTooltip(this.textRenderer, lines, mouseX, mouseY);
+            return;
+        }
 
         if (isHoveringSlot(relX, relY, SLOT_LEVER_X, SLOT_ROW0_Y)) {
             java.util.List<Text> lines = new java.util.ArrayList<>();
@@ -218,34 +425,12 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
             };
             lines.add(Text.literal("Redstone Mode: " + mode).formatted(Formatting.GRAY));
             lines.add((handler.getPowerStatus() == 1
-                ? Text.literal("Powered: Yes").formatted(Formatting.GREEN)
-                : Text.literal("Powered: No").formatted(Formatting.RED)));
+                ? Text.literal("Redstone Powered: Yes").formatted(Formatting.GREEN)
+                : Text.literal("Redstone Powered: No").formatted(Formatting.RED)));
             if (handler.isRedstoneBlocked()) {
                 lines.add(Text.literal("Blocked by redstone mode").formatted(Formatting.RED));
             }
             lines.add(Text.literal("Left-click to cycle").formatted(Formatting.DARK_GRAY));
-            context.drawTooltip(this.textRenderer, lines, mouseX, mouseY);
-            return;
-        }
-
-        if (isHoveringSlot(relX, relY, SLOT_CFE_POWER_X, SLOT_ROW0_Y)) {
-            if (!handler.hasRegisteredQuarry()) {
-                context.drawTooltip(this.textRenderer, java.util.List.of(
-                    Text.literal("Power: N/A").formatted(Formatting.GRAY),
-                    Text.literal("Register the controller first").formatted(Formatting.DARK_GRAY)
-                ), mouseX, mouseY);
-                return;
-            }
-
-            int required = Math.max(0, handler.getPowerRequiredCfePerTick());
-            int received = Math.max(0, handler.getPowerReceivedCfePerTick());
-
-            java.util.List<Text> lines = new java.util.ArrayList<>();
-            lines.add(Text.literal("Power: " + received + "/" + required + " CFE/t")
-                .formatted(handler.isPowerBlocked() ? Formatting.RED : Formatting.GRAY));
-            if (handler.isPowerBlocked()) {
-                lines.add(Text.literal("Insufficient Power").formatted(Formatting.RED));
-            }
             context.drawTooltip(this.textRenderer, lines, mouseX, mouseY);
             return;
         }
@@ -339,12 +524,10 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
                 if (handler.getQuarryState() == 1 && !handler.hasValidOutput()) {
                     lines.add(Text.literal("Cannot start until output is connected").formatted(Formatting.RED));
                 }
-                lines.add(Text.literal("Progress: " + handler.getProgressPercent() + "%").formatted(Formatting.DARK_GRAY));
+                lines.add(Text.literal("Progress (est): " + handler.getProgressPercent() + "%").formatted(Formatting.GRAY));
                 int eta = handler.getEtaSecondsEstimate();
-                lines.add(Text.literal("ETA (est): " + formatEtaMinutesSeconds(eta)).formatted(Formatting.DARK_GRAY));
-                lines.add(Text.literal("Remaining (est): " + handler.getRemainingEstimate() + " blocks").formatted(Formatting.DARK_GRAY));
-
-                // Power icon has its own tooltip.
+                lines.add(Text.literal("ETA (est): " + formatEtaMinutesSeconds(eta)).formatted(Formatting.GRAY));
+                lines.add(Text.literal("Remaining (est): " + handler.getRemainingEstimate() + " blocks").formatted(Formatting.GRAY));
 
                 String ownerName = getOwnerNameFromControllerBE();
                 if (ownerName == null) {
@@ -368,7 +551,7 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
                 }
 
                 lines.add(Text.literal("Owner: " + (ownerName != null ? ownerName : "Unknown"))
-                    .formatted(Formatting.DARK_GRAY));
+                    .formatted(Formatting.GRAY));
             }
 
             context.drawTooltip(this.textRenderer, lines, mouseX, mouseY);

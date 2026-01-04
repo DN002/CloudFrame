@@ -121,6 +121,12 @@ public class CloudFrameFabric implements ModInitializer {
 
         // Register tick event for packet/quarry updates
         ServerTickEvents.END_SERVER_TICK.register(this::onServerTick);
+
+        // Active scanning hook: track player block placements without mixins.
+        dev.cloudframe.fabric.quarry.PlayerPlacementDirtyHook.register();
+
+        // Power probe (wrench look tooltip): register server networking.
+        dev.cloudframe.fabric.power.PowerProbeServer.register();
         
         // Register glass frame protection listener
         dev.cloudframe.fabric.listeners.GlassFrameProtectionListener.register();
@@ -296,6 +302,14 @@ public class CloudFrameFabric implements ModInitializer {
 
     private void onServerTick(MinecraftServer server) {
         tickCounter++;
+
+        // If players place blocks back into already-mined space, enqueue them immediately.
+        // This path avoids mixins and should work in hybrid server environments.
+        try {
+            dev.cloudframe.fabric.quarry.PlayerPlacementDirtyHook.tick();
+        } catch (Exception ex) {
+            debug.log("onServerTick", "Exception ticking placement dirty hook: " + ex.getMessage());
+        }
 
         // Per-player chunk preview outlines (off by default; toggled via controller GUI).
         try {

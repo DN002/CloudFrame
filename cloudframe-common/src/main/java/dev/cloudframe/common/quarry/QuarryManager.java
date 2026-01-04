@@ -218,4 +218,19 @@ public class QuarryManager {
         }
         return null;
     }
+
+    /**
+     * Platform hook: notify quarries that a block changed/was placed at a location.
+     * Quarries use this to "actively scan" already-mined sections.
+     */
+    public void markDirtyBlock(Object world, int x, int y, int z) {
+        if (world == null) return;
+        for (Quarry q : quarries) {
+            if (q == null) continue;
+            Region r = q.getRegion();
+            if (r == null) continue;
+            if (!r.contains(world, x, y, z)) continue;
+            q.markDirtyBlock(world, x, y, z);
+        }
+    }
 }

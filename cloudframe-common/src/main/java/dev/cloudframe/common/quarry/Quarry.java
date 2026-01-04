@@ -84,12 +84,33 @@ public class Quarry {
     private int scanY;
     private int scanZ;
 
+    // True once we've completed at least one full scan pass and reset to the start.
+    // When true, the entire region is considered "already processed" for dirty detection.
+    private boolean scanWrapped;
+
     private boolean isScanning;
     private float mineProgress;
     private long tickCounter;
 
+    // Active scanning: if blocks are placed in already-mined sections, mine them promptly.
+    private static final int DIRTY_QUEUE_LIMIT = 512;
+    // Keep dirty targets ordered in the same scan order as normal quarry mining
+    // (y desc, x asc, z asc) so detours look consistent instead of random.
+    private final java.util.NavigableSet<Long> dirtyBlocks = new java.util.TreeSet<>(Quarry::comparePackedScanOrder);
+
+    // Fallback dirty scanning (works even if platform events/mixins aren't available).
+    private static final int DIRTY_SCAN_STEPS_PER_TICK = 4096;
+    private int dirtyScanX;
+    private int dirtyScanY;
+    private int dirtyScanZ;
+
     private int blocksMined;
     private int totalBlocks;
+    private boolean totalBlocksComputed;
+
+    // When true, the current target is a dirty (re-mine) detour. We do not count
+    // these toward region completion metrics.
+    private boolean currentTargetIsDirty;
 
     private final List<Object> outputBuffer = new ArrayList<>();
     private final Map<String, Integer> inFlightByDestination = new HashMap<>();
@@ -114,11 +135,18 @@ public class Quarry {
         this.scanZ = region.minZ();
         this.scanY = region.maxY();
 
+        this.dirtyScanX = region.minX();
+        this.dirtyScanZ = region.minZ();
+        this.dirtyScanY = region.maxY();
+
+        this.scanWrapped = false;
+
         this.blocksMined = 0;
 
-        // Best-effort: initialize totals from the selected region.
-        // Full mining logic will update blocksMined/totalBlocks more precisely later.
-        this.totalBlocks = Math.max(0, region.volume());
+        // Compute a precise mineable total lazily on first activation.
+        this.totalBlocks = 0;
+        this.totalBlocksComputed = false;
+        this.currentTargetIsDirty = false;
     }
 
     public UUID getOwner() { return owner; }
@@ -160,10 +188,11 @@ public class Quarry {
         mineProgress = 0.0f;
         outputJammed = false;
         outputJamTicks = 0;
-        if (totalBlocks <= 0) {
+        if (!totalBlocksComputed) {
             totalBlocks = computeTotalBlocks();
+            totalBlocksComputed = true;
         }
-        if (!platform.isMineable(location(currentX, currentY, currentZ))) {
+        if (!isMineableForQuarry(location(currentX, currentY, currentZ), currentX, currentY, currentZ)) {
             findNextBlockToMine(false);
         }
     }
@@ -197,20 +226,58 @@ public class Quarry {
         return getMineTicksPerBlock();
     }
 
-    public int getProgressPercent() {
+    public int getRemainingBlocksEstimate() {
         long total = Math.max(0L, (long) totalBlocks);
-        if (total <= 0L) return 0;
         long mined = Math.max(0L, (long) blocksMined);
-        long pct = (mined * 100L) / total;
+        long regionRemaining = Math.max(0L, total - mined);
+        long dirtyPending = Math.max(0L, (long) dirtyBlocks.size());
+        long remaining = regionRemaining + dirtyPending;
+        return remaining > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) remaining;
+    }
+
+    private static int comparePackedScanOrder(Long aObj, Long bObj) {
+        if (aObj == null && bObj == null) return 0;
+        if (aObj == null) return -1;
+        if (bObj == null) return 1;
+        long a = aObj;
+        long b = bObj;
+
+        int ay = unpackY(a);
+        int by = unpackY(b);
+        if (ay != by) return Integer.compare(by, ay); // y desc
+
+        int ax = unpackX(a);
+        int bx = unpackX(b);
+        if (ax != bx) return Integer.compare(ax, bx); // x asc
+
+        int az = unpackZ(a);
+        int bz = unpackZ(b);
+        if (az != bz) return Integer.compare(az, bz); // z asc
+
+        // Stable tie-breaker.
+        return Long.compare(a, b);
+    }
+
+    public int getProgressPercent() {
+        // UI progress is meant to reflect completion of the mineable region.
+        // This avoids jumping ahead just because the initial scan skips non-mineable
+        // blocks (air, frame ring, etc.).
+        if (scanWrapped && dirtyBlocks.isEmpty()) return 100;
+
+        int total = Math.max(0, totalBlocks);
+        if (total <= 0) return 0;
+
+        int mined = Math.max(0, blocksMined);
+        if (mined >= total) return 100;
+
+        long pct = ((long) mined * 100L) / (long) total;
         if (pct < 0L) pct = 0L;
         if (pct > 100L) pct = 100L;
         return (int) pct;
     }
 
     public int getEtaSecondsEstimate() {
-        long total = Math.max(0L, (long) totalBlocks);
-        long mined = Math.max(0L, (long) blocksMined);
-        long remaining = Math.max(0L, total - mined);
+        long remaining = Math.max(0L, (long) getRemainingBlocksEstimate());
         if (remaining <= 0L) return 0;
         long ticks = remaining * (long) getMineTicksPerBlock();
         long seconds = ticks / 20L;
@@ -347,6 +414,18 @@ public class Quarry {
 
         if (!active) return;
 
+        // Fallback active scanning: re-scan already-processed space for newly mineable blocks.
+        // This keeps the quarry responsive even if platform-level block-place hooks are unavailable.
+        scanForDirtyBlocksFallback(DIRTY_SCAN_STEPS_PER_TICK);
+
+        // Active scanning: mine newly placed blocks in already-cleared areas promptly.
+        // Only switch targets between blocks so we don't interrupt mining progress mid-block.
+        if (mineProgress == 0.0f) {
+            if (trySwitchToDirtyTarget(shouldLog)) {
+                isScanning = false;
+            }
+        }
+
         if (!hasValidOutput()) {
             debug.log("tick", "No valid output for quarry controller=" + controller + " — pausing");
             setActive(false);
@@ -386,7 +465,7 @@ public class Quarry {
         Object currentLoc = location(currentX, currentY, currentZ);
         if (currentLoc == null) return;
 
-        if (!platform.isMineable(currentLoc)) {
+        if (!isMineableForQuarry(currentLoc, currentX, currentY, currentZ)) {
             if (!findNextBlockToMine(shouldLog)) {
                 isScanning = true;
                 mineProgress = 0.0f;
@@ -417,7 +496,9 @@ public class Quarry {
                 platform.playBreakEffects(currentLoc);
             }
             platform.setBlockAir(currentLoc);
-            blocksMined++;
+            if (!currentTargetIsDirty) {
+                blocksMined++;
+            }
 
             if (!silentMode) {
                 platform.sendBlockCrack(currentLoc, 0.0f);
@@ -459,6 +540,118 @@ public class Quarry {
     public boolean isMetadataReady() { return false; }
     public boolean isScanningMetadata() { return false; }
     public boolean isScanning() { return isScanning; }
+
+    /**
+     * Marks a block inside the quarry region as dirty so it can be mined promptly.
+     * Intended to be called by platform hooks when blocks are placed/changed.
+     */
+    public void markDirtyBlock(Object worldObj, int x, int y, int z) {
+        if (worldObj == null || world == null) return;
+        if (!world.equals(worldObj)) return;
+        if (!region.contains(worldObj, x, y, z)) return;
+
+        // Only treat blocks as "dirty" if they are in already-processed space.
+        // Otherwise we'd mine ahead of the normal scan order.
+        if (!isBehindScanPointer(x, y, z)) return;
+
+        Object loc = location(x, y, z);
+        if (loc == null) return;
+        if (!isMineableForQuarry(loc, x, y, z)) return;
+
+        long packed = packPos(x, y, z);
+        if (!dirtyBlocks.add(packed)) return;
+        while (dirtyBlocks.size() > DIRTY_QUEUE_LIMIT) {
+            dirtyBlocks.pollLast();
+        }
+    }
+
+    private boolean trySwitchToDirtyTarget(boolean shouldLog) {
+        while (!dirtyBlocks.isEmpty()) {
+            Long packedObj = dirtyBlocks.pollFirst();
+            if (packedObj == null) break;
+            long packed = packedObj;
+
+            int x = unpackX(packed);
+            int y = unpackY(packed);
+            int z = unpackZ(packed);
+            Object loc = location(x, y, z);
+            if (loc == null) continue;
+            if (!isMineableForQuarry(loc, x, y, z)) continue;
+
+            currentX = x;
+            currentY = y;
+            currentZ = z;
+            currentTargetIsDirty = true;
+
+            if (shouldLog) {
+                debug.log("dirty", "Switching to newly-placed block at (" + x + "," + y + "," + z + ")");
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private void scanForDirtyBlocksFallback(int steps) {
+        if (steps <= 0) return;
+        if (blocksMined <= 0) return;
+
+        int minX = region.minX();
+        int maxX = region.maxX();
+        int minY = region.minY();
+        int maxY = region.maxY();
+        int minZ = region.minZ();
+        int maxZ = region.maxZ();
+
+        for (int i = 0; i < steps; i++) {
+            // Only scan already-processed space; otherwise we'd enqueue future blocks.
+            if (!isBehindScanPointer(dirtyScanX, dirtyScanY, dirtyScanZ)) {
+                // Wrap back to start to continuously re-check old space.
+                dirtyScanX = minX;
+                dirtyScanZ = minZ;
+                dirtyScanY = maxY;
+                if (!isBehindScanPointer(dirtyScanX, dirtyScanY, dirtyScanZ)) {
+                    return;
+                }
+            }
+
+            Object loc = location(dirtyScanX, dirtyScanY, dirtyScanZ);
+            if (loc != null && isMineableForQuarry(loc, dirtyScanX, dirtyScanY, dirtyScanZ)) {
+                long packed = packPos(dirtyScanX, dirtyScanY, dirtyScanZ);
+                if (dirtyBlocks.add(packed)) {
+                    while (dirtyBlocks.size() > DIRTY_QUEUE_LIMIT) {
+                        dirtyBlocks.pollLast();
+                    }
+                }
+            }
+
+            // Advance dirty scan position (y desc, x asc, z asc).
+            dirtyScanZ++;
+            if (dirtyScanZ > maxZ) {
+                dirtyScanZ = minZ;
+                dirtyScanX++;
+                if (dirtyScanX > maxX) {
+                    dirtyScanX = minX;
+                    dirtyScanY--;
+                    if (dirtyScanY < minY) {
+                        dirtyScanY = maxY;
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean isBehindScanPointer(int x, int y, int z) {
+        if (scanWrapped) return true;
+
+        // Scan order: y desc, x asc, z asc.
+        if (y > scanY) return true;
+        if (y < scanY) return false;
+
+        if (x < scanX) return true;
+        if (x > scanX) return false;
+
+        return z < scanZ;
+    }
 
     private void advancePosition(boolean shouldLog) {
         if (!findNextBlockToMine(shouldLog) && shouldLog) {
@@ -606,11 +799,12 @@ public class Quarry {
             for (int x = (y == scanY ? scanX : minX); x <= maxX; x++) {
                 for (int z = (y == scanY && x == scanX ? scanZ : minZ); z <= maxZ; z++) {
                     Object loc = location(x, y, z);
-                    if (!platform.isMineable(loc)) continue;
+                    if (!isMineableForQuarry(loc, x, y, z)) continue;
 
                     currentX = x;
                     currentY = y;
                     currentZ = z;
+                    currentTargetIsDirty = false;
 
                     scanZ = z + 1;
                     scanX = x;
@@ -640,6 +834,7 @@ public class Quarry {
     }
 
     private void resetScanPosition() {
+        scanWrapped = true;
         scanX = region.minX();
         scanZ = region.minZ();
         scanY = region.maxY();
@@ -647,6 +842,7 @@ public class Quarry {
         currentX = scanX;
         currentZ = scanZ;
         currentY = scanY;
+        currentTargetIsDirty = false;
     }
 
     private int computeTotalBlocks() {
@@ -656,7 +852,7 @@ public class Quarry {
             for (int x = region.minX(); x <= region.maxX(); x++) {
                 for (int z = region.minZ(); z <= region.maxZ(); z++) {
                     Object loc = location(x, y, z);
-                    if (platform.isMineable(loc)) count++;
+                    if (isMineableForQuarry(loc, x, y, z)) count++;
                 }
             }
         }
@@ -679,9 +875,51 @@ public class Quarry {
         return (ENERGY_PER_BLOCK_CFE + (long) tpb - 1L) / (long) tpb;
     }
 
+    // Vanilla-style packing (26 bits X, 12 bits Y, 26 bits Z).
+    // Supports typical world bounds (±33M), and keeps this module dependency-free.
+    private static long packPos(int x, int y, int z) {
+        return (((long) x & 0x3FFFFFFL) << 38) | (((long) z & 0x3FFFFFFL) << 12) | ((long) y & 0xFFFL);
+    }
+
+    private static int unpackX(long packed) {
+        return (int) (packed >> 38);
+    }
+
+    private static int unpackY(long packed) {
+        // sign-extend 12-bit Y
+        return (int) (packed << 52 >> 52);
+    }
+
+    private static int unpackZ(long packed) {
+        // sign-extend 26-bit Z
+        return (int) (packed << 26 >> 38);
+    }
+
     private Object location(int x, int y, int z) {
         if (world == null) return null;
         return platform.createLocation(world, x, y, z);
+    }
+
+    private boolean isFramePerimeterPos(int x, int y, int z) {
+        // The visual glass frame is a 2D ring placed on the top layer only.
+        if (y != region.maxY()) return false;
+
+        int minX = frameMinX();
+        int maxX = frameMaxX();
+        int minZ = frameMinZ();
+        int maxZ = frameMaxZ();
+
+        if (x < minX || x > maxX || z < minZ || z > maxZ) return false;
+        return (x == minX || x == maxX || z == minZ || z == maxZ);
+    }
+
+    private boolean isMineableForQuarry(Object loc, int x, int y, int z) {
+        if (loc == null) return false;
+        if (!platform.isMineable(loc)) return false;
+
+        // Protect the quarry's visual frame boundary from mining.
+        if (platform.isGlassFrameBlock(loc) && isFramePerimeterPos(x, y, z)) return false;
+        return true;
     }
 
     private void onItemDelivered(Object destination, int deliveredAmount) {

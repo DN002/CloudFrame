@@ -1,0 +1,16 @@
+{
+  "mappings": {
+    "dev/cloudframe/fabric/mixin/ServerWorldSetBlockStateMixin": {
+      "setBlockState(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;I)Z": "Lnet/minecraft/class_3218;method_8652(Lnet/minecraft/class_2338;Lnet/minecraft/class_2680;I)Z",
+      "setBlockState(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;II)Z": "Lnet/minecraft/class_3218;method_30092(Lnet/minecraft/class_2338;Lnet/minecraft/class_2680;II)Z"
+    }
+  },
+  "data": {
+    "named:intermediary": {
+      "dev/cloudframe/fabric/mixin/ServerWorldSetBlockStateMixin": {
+        "setBlockState(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;I)Z": "Lnet/minecraft/class_3218;method_8652(Lnet/minecraft/class_2338;Lnet/minecraft/class_2680;I)Z",
+        "setBlockState(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;II)Z": "Lnet/minecraft/class_3218;method_30092(Lnet/minecraft/class_2338;Lnet/minecraft/class_2680;II)Z"
+      }
+    }
+  }
+}

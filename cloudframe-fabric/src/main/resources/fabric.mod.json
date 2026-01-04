@@ -12,11 +12,13 @@
     "sources": "https://github.com/DN002/CloudFrame"
   },
   "license": "MIT",
-  "icon": "assets/cloudframe/icon.png",
   "environment": "*",
   "entrypoints": {
     "main": [
       "dev.cloudframe.fabric.CloudFrameFabric"
+    ],
+    "client": [
+      "dev.cloudframe.fabric.client.CloudFrameFabricClient"
     ]
   },
   "mixins": [

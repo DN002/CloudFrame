@@ -20,3 +20,10 @@
 # OS
 .DS_Store
 Thumbs.db
+
+# Local artifacts
+*.hprof
+*.log
+build_log.txt
+build.log
+.tmp_fabric_api/

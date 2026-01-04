@@ -58,6 +58,18 @@ public class WrenchListener implements Listener {
             return;
         }
 
+        // Check for shift+right-click on glass frame to break it
+        if (p.isSneaking() && action == Action.RIGHT_CLICK_BLOCK && e.getClickedBlock() != null) {
+            if (e.getClickedBlock().getType() == Material.GLASS) {
+                // Allow frame breaking with shift+wrench
+                // GlassFrameProtectionListener will check this flag
+                e.getClickedBlock().setType(Material.AIR, false);
+                p.sendMessage("§aGlass frame broken.");
+                e.setCancelled(true);
+                return;
+            }
+        }
+
         // Finalization fallback: when the player clicks the controller's client-side selection box,
         // the server sees an "air" block click. Handle that first so we don't show marker errors.
         Location controllerLoc = null;
@@ -99,111 +111,47 @@ public class WrenchListener implements Listener {
         Location clicked = e.getClickedBlock().getLocation();
         debug.log("onInteract", "Player " + p.getName() + " used Cloud Wrench at " + clicked);
 
-        // Must have both marker positions for frame creation
-        if (!CloudFrameRegistry.markers().hasBoth(p.getUniqueId())) {
-            debug.log("onInteract", "Player " + p.getName() + " missing marker positions");
-            p.sendMessage("§cYou must set both marker positions first.");
-            return;
-        }
-
-        // Normalize region
-        Location a = CloudFrameRegistry.markers().getPosA(p.getUniqueId());
-        Location b = CloudFrameRegistry.markers().getPosB(p.getUniqueId());
-        Region region = new Region(a, b);
-        boolean creatingFromMarkers = true;
-
-        debug.log("onInteract", "Raw region: " + region);
-
-        // Expand region vertically: top = clicked Y, bottom = world min height
-        int topY = clicked.getBlockY();
-        int bottomY = region.getWorld().getMinHeight();
-
-        region = new Region(
-                new Location(region.getWorld(), region.minX(), bottomY, region.minZ()),
-                new Location(region.getWorld(), region.maxX(), topY, region.maxZ())
-        );
-
-        debug.log("onInteract", "Expanded vertical region: " + region);
-
-        // Validate size
-        if (!isValidQuarrySize(region)) {
-            debug.log("onInteract", "Invalid quarry size: width=" + region.width() +
-                    " length=" + region.length());
-            p.sendMessage("§cQuarry must be between " + MIN_QUARRY_SIZE + ".." + MAX_QUARRY_SIZE + " blocks on each side (got " + region.width() + "x" + region.length() + ").");
-            return;
-        }
-
-        // Check overlap with existing quarries
-        for (Quarry q : CloudFrameRegistry.quarries().all()) {
-            if (q.getRegion().intersects(region)) {
-                debug.log("onInteract", "Quarry overlap detected with existing quarry owner=" + q.getOwner());
-                p.sendMessage("§cThis quarry overlaps an existing quarry.");
-                return;
+        // Check if clicking on a tube to toggle inventory connection
+        if (dev.cloudframe.cloudframe.util.CustomBlocks.isTube(e.getClickedBlock())) {
+            var tubeNode = CloudFrameRegistry.tubes().getTube(clicked);
+            if (tubeNode != null) {
+                // Determine which direction was clicked based on the block face
+                int dirIndex = getDirectionIndex(e.getBlockFace());
+                if (dirIndex >= 0) {
+                    tubeNode.toggleInventorySideDisabled(dirIndex);
+                    
+                    // Rebuild tube network to apply changes immediately
+                    CloudFrameRegistry.tubes().rebuildAll();
+                    
+                    CloudFrameRegistry.tubes().saveAll();
+                    
+                    // Give player feedback
+                    boolean disabled = tubeNode.isInventorySideDisabled(dirIndex);
+                    String dirName = switch (dirIndex) {
+                        case 0 -> "East";
+                        case 1 -> "West";
+                        case 2 -> "Up";
+                        case 3 -> "Down";
+                        case 4 -> "South";
+                        case 5 -> "North";
+                        default -> "Unknown";
+                    };
+                    p.sendMessage("§7Tube connection §f" + dirName + "§7: " + (disabled ? "§cDisabled" : "§aEnabled"));
+                    
+                    e.setCancelled(true);
+                    return;
+                }
             }
         }
 
-        // Controller must be placed on the border of the region
-        boolean onBorder =
-                clicked.getBlockX() == region.minX() ||
-                clicked.getBlockX() == region.maxX() ||
-                clicked.getBlockZ() == region.minZ() ||
-                clicked.getBlockZ() == region.maxZ();
-
-        if (!onBorder) {
-            debug.log("onInteract", "Clicked block not on border: " + clicked);
-            p.sendMessage("§cController must be placed on the border of the quarry frame.");
-            return;
-        }
-
-        int cx = clicked.getBlockX();
-        int cy = region.maxY(); // controller always at top layer
-        int cz = clicked.getBlockZ();
-
-        if (cx == region.minX()) cx -= 1;
-        else if (cx == region.maxX()) cx += 1;
-
-        if (cz == region.minZ()) cz -= 1;
-        else if (cz == region.maxZ()) cz += 1;
-
-        Location controller = new Location(region.getWorld(), cx, cy, cz);
-
-        // Determine if clicked block is part of the frame (glass)
-        boolean clickedIsFrame = e.getClickedBlock().getType() == Material.GLASS;
-
-        // If creating from markers (building the frame), do NOT auto-place a controller.
-        // Controllers are entity-only now; the player places it separately.
-        if (creatingFromMarkers) {
-            debug.log("onInteract", "Building quarry border for region (markers) " + region + " — not placing controller");
-            buildBorder(region);
-            p.sendMessage("§aQuarry frame created. Place a Quarry Controller adjacent to the frame, then use the wrench on it to finalize.");
-            CloudFrameRegistry.markers().clear(p.getUniqueId());
-            debug.log("onInteract", "Cleared markers for " + p.getName());
-            return;
-        }
-
-        if (clickedIsFrame) {
-            p.sendMessage("§cPlace a Quarry Controller adjacent to the frame, then use the wrench to finalize.");
-            return;
-        }
-
-        // Register quarry
-        Quarry quarry = new Quarry(
-                p.getUniqueId(),
-                a,
-                b,
-                region,
-            controller,
-            0
-        );
-
-        CloudFrameRegistry.quarries().register(quarry);
-        debug.log("onInteract", "Registered new quarry for owner=" + p.getUniqueId());
-
-        p.sendMessage("§aQuarry frame created.");
-
-        // Clear markers
-        CloudFrameRegistry.markers().clear(p.getUniqueId());
-        debug.log("onInteract", "Cleared markers for " + p.getName());
+        // Frame is now auto-created when both markers are set.
+        // Wrench is only used for:
+        // 1. Finalizing quarry by clicking controller
+        // 2. Toggling tube inventory connections
+        // 3. Breaking glass frames with shift+right-click
+        debug.log("onInteract", "Player " + p.getName() + " clicked block but no tube/controller found");
+        p.sendMessage("§cYou must set both marker positions with the marker item first. The frame will appear automatically.");
+        return;
     }
 
     /**
@@ -622,6 +570,9 @@ public class WrenchListener implements Listener {
         CloudFrameRegistry.quarries().register(quarry);
         debug.log("finalizeQuarryAt", "Registered new quarry for owner=" + p.getUniqueId());
 
+        // Create glass frame to visualize quarry region
+        quarry.createGlassFrame();
+
         p.sendMessage("§aQuarry controller finalized.");
 
         // Clear markers
@@ -681,5 +632,21 @@ public class WrenchListener implements Listener {
         }
 
         return true;
+    }
+    
+    /**
+     * Convert Bukkit BlockFace to direction index (0-5).
+     * Used for tube inventory connection toggling.
+     */
+    private static int getDirectionIndex(org.bukkit.block.BlockFace face) {
+        return switch (face) {
+            case EAST -> 0;   // +X
+            case WEST -> 1;   // -X
+            case UP -> 2;     // +Y
+            case DOWN -> 3;   // -Y
+            case SOUTH -> 4;  // +Z
+            case NORTH -> 5;  // -Z
+            default -> -1;    // Invalid face
+        };
     }
 }

@@ -7,12 +7,12 @@ public class DebugFlags {
     public static boolean TICK_LOGGING = false;
 
     // Visual debug only; keep off by default.
-    public static boolean TUBE_PARTICLES = false;
+    public static boolean PIPE_PARTICLES = false;
 
     // Spammy on busy servers; keep off by default.
     public static boolean CHUNK_LOGGING = false;
 
-    // Verbose tube/quarry DB load/save logs; keep off by default.
+    // Verbose pipe/quarry DB load/save logs; keep off by default.
     public static boolean STARTUP_LOAD_LOGGING = false;
 
     // Very verbose resourcepack build + HTTP request logs; keep off by default.

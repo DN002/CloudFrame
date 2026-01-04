@@ -98,6 +98,11 @@ public class ControllerGuiListener implements Listener {
 
         e.setCancelled(true);
 
+        // Ignore clicks in the player inventory
+        if (e.getRawSlot() >= e.getView().getTopInventory().getSize()) {
+            return;
+        }
+
         // Retrieve quarry from GUI holder
         InventoryHolder holder = e.getView().getTopInventory().getHolder();
         if (!(holder instanceof QuarryHolder qh)) {
@@ -135,25 +140,25 @@ public class ControllerGuiListener implements Listener {
             boolean next = !q.isOutputRoundRobin();
             q.setOutputRoundRobin(next);
             p.sendMessage("§bOutput routing: " + (next ? "§aRound Robin" : "§eFill First"));
+            dev.cloudframe.cloudframe.core.CloudFrameRegistry.quarries().saveAll();
             return;
         }
 
-        // --- Pause Quarry ---
-        if (name.contains("Pause")) {
-            q.setActive(false);
-            p.sendMessage("§cQuarry paused.");
-            // GUI will update automatically via update task
-            return;
-        }
-
-        // --- Resume Quarry ---
-        if (name.contains("Resume")) {
-            if (!q.hasValidOutput()) {
-                p.sendMessage("§cNo valid output: connect tubes to a chest (inventory) before starting.");
-                return;
+        // --- Toggle Quarry (Lever in slot 7) ---
+        if (rawSlot == 7 || name.contains("Pause") || name.contains("Resume")) {
+            if (q.isActive()) {
+                q.setActive(false);
+                p.sendMessage("§cQuarry paused.");
+                dev.cloudframe.cloudframe.core.CloudFrameRegistry.quarries().saveAll();
+            } else {
+                if (!q.hasValidOutput()) {
+                    p.sendMessage("§cNo valid output: connect tubes to a chest (inventory) before starting.");
+                    return;
+                }
+                q.setActive(true);
+                p.sendMessage("§aQuarry resumed.");
+                dev.cloudframe.cloudframe.core.CloudFrameRegistry.quarries().saveAll();
             }
-            q.setActive(true);
-            p.sendMessage("§aQuarry resumed.");
             // GUI will update automatically via update task
             return;
         }
@@ -210,6 +215,14 @@ public class ControllerGuiListener implements Listener {
             p.closeInventory();
             return;
         }
+    }
+
+    @EventHandler
+    public void onInventoryDrag(org.bukkit.event.inventory.InventoryDragEvent e) {
+        if (!(e.getWhoClicked() instanceof Player)) return;
+        if (!e.getView().getTitle().equals("Quarry Controller")) return;
+        // Block ALL dragging in the GUI (top inventory and player inventory)
+        e.setCancelled(true);
     }
 
     private static void handleSilkAugmentClick(InventoryClickEvent e, Player p, Quarry q) {

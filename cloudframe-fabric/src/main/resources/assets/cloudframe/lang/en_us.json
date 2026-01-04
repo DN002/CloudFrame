@@ -1,0 +1,20 @@
+{
+  "block.cloudframe.tube": "Cloud Pipe",
+  "block.cloudframe.cloud_cable": "Cloud Cable",
+  "block.cloudframe.stratus_panel": "Stratus Panel",
+  "block.cloudframe.cloud_turbine": "Cloud Turbine",
+  "block.cloudframe.cloud_cell": "Cloud Cell",
+  "block.cloudframe.quarry_controller": "Quarry Controller",
+  "item.cloudframe.tube": "Cloud Pipe",
+  "item.cloudframe.cloud_cable": "Cloud Cable",
+  "item.cloudframe.stratus_panel": "Stratus Panel",
+  "item.cloudframe.cloud_turbine": "Cloud Turbine",
+  "item.cloudframe.cloud_cell": "Cloud Cell",
+  "item.cloudframe.quarry_controller": "Quarry Controller",
+  "item.cloudframe.marker": "Marker",
+  "item.cloudframe.wrench": "Wrench",
+  "item.cloudframe.silk_touch_augment": "Silk Touch Augment",
+  "item.cloudframe.speed_augment_1": "Speed Augment I",
+  "item.cloudframe.speed_augment_2": "Speed Augment II",
+  "item.cloudframe.speed_augment_3": "Speed Augment III"
+}

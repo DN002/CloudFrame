@@ -1,0 +1,62 @@
+{
+	"parent": "minecraft:block/block",
+	"textures": {
+		"marker": "cloudframe:item/cloud_marker",
+		"particle": "cloudframe:item/cloud_marker"
+	},
+	"elements": [
+		{
+			"name": "platform",
+			"from": [4, 0, 4],
+			"to": [12, 1, 12],
+			"faces": {
+				"north": {"uv": [4, 15, 12, 16], "texture": "#marker"},
+				"east": {"uv": [4, 15, 12, 16], "texture": "#marker"},
+				"south": {"uv": [4, 15, 12, 16], "texture": "#marker"},
+				"west": {"uv": [4, 15, 12, 16], "texture": "#marker"},
+				"up": {"uv": [6, 12, 10, 16], "texture": "#marker"},
+				"down": {"uv": [6, 12, 10, 16], "texture": "#marker"}
+			}
+		},
+		{
+			"name": "laser-base",
+			"from": [6, 0, 6],
+			"to": [10, 2, 10],
+			"faces": {
+				"north": {"uv": [7, 7, 9, 8], "texture": "#marker"},
+				"east": {"uv": [7, 7, 9, 8], "texture": "#marker"},
+				"south": {"uv": [7, 7, 9, 8], "texture": "#marker"},
+				"west": {"uv": [7, 7, 9, 8], "texture": "#marker"},
+				"up": {"uv": [7, 6, 9, 8], "texture": "#marker"},
+				"down": {"uv": [7, 6, 9, 8], "texture": "#marker"}
+			}
+		},
+		{
+			"name": "laser-top",
+			"from": [7, 2, 7],
+			"to": [9, 8, 9],
+			"rotation": {"angle": 0, "axis": "y", "origin": [0, 2, 0]},
+			"faces": {
+				"north": {"uv": [7, 3, 9, 8], "texture": "#marker"},
+				"east": {"uv": [7, 3, 9, 8], "texture": "#marker"},
+				"south": {"uv": [7, 3, 9, 8], "texture": "#marker"},
+				"west": {"uv": [7, 3, 9, 8], "texture": "#marker"},
+				"up": {"uv": [7, 6, 9, 8], "texture": "#marker"},
+				"down": {"uv": [7, 6, 9, 8], "texture": "#marker"}
+			}
+		}
+	],
+	"display": {
+		"ground": {
+			"scale": [0.95, 0.95, 0.95]
+		}
+	},
+	"groups": [
+		{
+			"name": "main",
+			"origin": [0, 2, 0],
+			"color": 0,
+			"children": [0, 1, 2]
+		}
+	]
+}

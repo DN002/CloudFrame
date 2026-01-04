@@ -63,6 +63,27 @@ public class BukkitQuarryPlatform implements QuarryPlatform {
     }
 
     @Override
+    public boolean isRedstonePowered(Object loc) {
+        if (!(loc instanceof Location l)) return false;
+        Block block = l.getBlock();
+        try {
+            return block.isBlockPowered() || block.isBlockIndirectlyPowered() || block.getBlockPower() > 0;
+        } catch (Throwable ignored) {
+            return block.getBlockPower() > 0;
+        }
+    }
+
+    @Override
+    public void setChunkForced(Object world, int chunkX, int chunkZ, boolean forced) {
+        if (!(world instanceof World w)) return;
+        try {
+            w.setChunkForceLoaded(chunkX, chunkZ, forced);
+        } catch (Throwable ignored) {
+            // Best-effort; older servers may not support this.
+        }
+    }
+
+    @Override
     public boolean isMineable(Object loc) {
         if (!(loc instanceof Location l)) return false;
         Block block = l.getBlock();
@@ -225,6 +246,14 @@ public class BukkitQuarryPlatform implements QuarryPlatform {
     }
 
     @Override
+    public String worldName(Object world) {
+        if (world instanceof World w) {
+            return w.getName();
+        }
+        return world != null ? world.toString() : "";
+    }
+
+    @Override
     public int blockX(Object loc) {
         if (loc instanceof Location l) return l.getBlockX();
         return 0;
@@ -240,6 +269,22 @@ public class BukkitQuarryPlatform implements QuarryPlatform {
     public int blockZ(Object loc) {
         if (loc instanceof Location l) return l.getBlockZ();
         return 0;
+    }
+
+    @Override
+    public int stackAmount(Object itemStack) {
+        if (itemStack instanceof ItemStack stack) return stack.getAmount();
+        return 0;
+    }
+
+    @Override
+    public Object copyWithAmount(Object itemStack, int amount) {
+        if (itemStack instanceof ItemStack stack) {
+            ItemStack copy = stack.clone();
+            copy.setAmount(Math.max(0, amount));
+            return copy;
+        }
+        return itemStack;
     }
 
     @Override
@@ -278,5 +323,64 @@ public class BukkitQuarryPlatform implements QuarryPlatform {
     public UUID ownerFromPlayer(Object player) {
         if (player instanceof Player p) return p.getUniqueId();
         return new UUID(0, 0);
+    }
+    
+    @Override
+    public void placeGlassFrame(Object worldObj, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+        // Create a visible glass frame around the quarry region (Bukkit implementation)
+        if (!(worldObj instanceof org.bukkit.World w)) return;
+        
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    // Only place glass on the edges/corners (frame outline)
+                    boolean isEdgeX = (x == minX || x == maxX);
+                    boolean isEdgeY = (y == minY || y == maxY);
+                    boolean isEdgeZ = (z == minZ || z == maxZ);
+                    
+                    // Place glass if it's on at least 2 edges (forms the frame structure)
+                    int edgeCount = (isEdgeX ? 1 : 0) + (isEdgeY ? 1 : 0) + (isEdgeZ ? 1 : 0);
+                    if (edgeCount >= 2) {
+                        Location loc = new Location(w, x, y, z);
+                        org.bukkit.block.Block block = loc.getBlock();
+                        
+                        // Only replace air blocks
+                        if (block.getType() == org.bukkit.Material.AIR) {
+                            block.setType(org.bukkit.Material.GLASS, false);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    @Override
+    public void removeGlassFrame(Object worldObj, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+        // Remove the glass frame when quarry is removed (Bukkit implementation)
+        if (!(worldObj instanceof org.bukkit.World w)) return;
+        
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    boolean isEdgeX = (x == minX || x == maxX);
+                    boolean isEdgeY = (y == minY || y == maxY);
+                    boolean isEdgeZ = (z == minZ || z == maxZ);
+                    
+                    int edgeCount = (isEdgeX ? 1 : 0) + (isEdgeY ? 1 : 0) + (isEdgeZ ? 1 : 0);
+                    if (edgeCount >= 2) {
+                        Location loc = new Location(w, x, y, z);
+                        if (isGlassFrameBlock(loc)) {
+                            loc.getBlock().setType(org.bukkit.Material.AIR, false);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    @Override
+    public boolean isGlassFrameBlock(Object loc) {
+        if (!(loc instanceof Location l)) return false;
+        return l.getBlock().getType() == org.bukkit.Material.GLASS;
     }
 }

@@ -1,5 +1,5 @@
 plugins {
-	id 'fabric-loom' version '1.7-SNAPSHOT'
+	id 'fabric-loom' version '1.14.10'
 	id 'maven-publish'
 }
 
@@ -17,6 +17,7 @@ repositories {
 	// See https://docs.gradle.org/current/userguide/declaring_repositories.html
 	// for more information about repositories.
 	mavenLocal()
+	mavenCentral()
 }
 
 loom {
@@ -25,6 +26,7 @@ loom {
 	mods {
 		"cloudframe" {
 			sourceSet sourceSets.main
+			sourceSet sourceSets.client
 		}
 	}
 
@@ -41,9 +43,11 @@ dependencies {
 
 	// CloudFrame Common (local Maven)
 	implementation 'dev.cloudframe:cloudframe-common:2.0.0'
+	include 'dev.cloudframe:cloudframe-common:2.0.0'
 
 	// SQLite (shaded into jar)
 	implementation 'org.xerial:sqlite-jdbc:3.46.0.0'
+	include 'org.xerial:sqlite-jdbc:3.46.0.0'
 }
 
 processResources {
@@ -72,6 +76,8 @@ jar {
 	from("LICENSE") {
 		rename { "${it}_${project.base.archivesName.get()}"}
 	}
+
+	// Keep default jar inputs (classes/resources). Dependency bundling is handled via Loom's include().
 }
 
 // configure the maven publication

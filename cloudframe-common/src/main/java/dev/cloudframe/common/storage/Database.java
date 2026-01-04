@@ -38,6 +38,7 @@ public class Database {
             stmt.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS quarries (
                     owner TEXT NOT NULL,
+                    ownerName TEXT,
                     world TEXT NOT NULL,
                     ax INTEGER, ay INTEGER, az INTEGER,
                     bx INTEGER, by INTEGER, bz INTEGER,
@@ -45,7 +46,14 @@ public class Database {
                     controllerY INTEGER,
                     controllerZ INTEGER,
                     active INTEGER DEFAULT 1,
-                    controllerYaw INTEGER DEFAULT 0
+                    controllerYaw INTEGER DEFAULT 0,
+                    redstoneMode INTEGER DEFAULT 0,
+                    chunkLoadingEnabled INTEGER DEFAULT 0,
+                    silentMode INTEGER DEFAULT 0,
+                    frameMinX INTEGER,
+                    frameMinZ INTEGER,
+                    frameMaxX INTEGER,
+                    frameMaxZ INTEGER
                 );
             """);
 
@@ -76,22 +84,83 @@ public class Database {
                 // Column already exists (or table is new).
             }
 
-            // Tubes table
+            // Best-effort migrations for stored glass-frame bounds (perimeter may differ from mining region).
+            try {
+                stmt.executeUpdate("ALTER TABLE quarries ADD COLUMN frameMinX INTEGER");
+            } catch (SQLException ignored) {
+                // Column already exists.
+            }
+            try {
+                stmt.executeUpdate("ALTER TABLE quarries ADD COLUMN frameMinZ INTEGER");
+            } catch (SQLException ignored) {
+                // Column already exists.
+            }
+            try {
+                stmt.executeUpdate("ALTER TABLE quarries ADD COLUMN frameMaxX INTEGER");
+            } catch (SQLException ignored) {
+                // Column already exists.
+            }
+            try {
+                stmt.executeUpdate("ALTER TABLE quarries ADD COLUMN frameMaxZ INTEGER");
+            } catch (SQLException ignored) {
+                // Column already exists.
+            }
+
+            // Best-effort migrations for controller settings.
+            try {
+                stmt.executeUpdate("ALTER TABLE quarries ADD COLUMN redstoneMode INTEGER DEFAULT 0");
+            } catch (SQLException ignored) {
+                // Column already exists.
+            }
+            try {
+                stmt.executeUpdate("ALTER TABLE quarries ADD COLUMN chunkLoadingEnabled INTEGER DEFAULT 0");
+            } catch (SQLException ignored) {
+                // Column already exists.
+            }
+            try {
+                stmt.executeUpdate("ALTER TABLE quarries ADD COLUMN silentMode INTEGER DEFAULT 0");
+            } catch (SQLException ignored) {
+                // Column already exists.
+            }
+
+            // Best-effort migration for storing a friendly owner username.
+            try {
+                stmt.executeUpdate("ALTER TABLE quarries ADD COLUMN ownerName TEXT");
+            } catch (SQLException ignored) {
+                // Column already exists.
+            }
+
+            // Pipes table
             stmt.executeUpdate("""
-                CREATE TABLE IF NOT EXISTS tubes (
+                CREATE TABLE IF NOT EXISTS pipes (
                     world TEXT NOT NULL,
                     x INTEGER, y INTEGER, z INTEGER
                 );
             """);
 
+            // Best-effort migration for disabled inventory sides.
+            try {
+                stmt.executeUpdate("ALTER TABLE pipes ADD COLUMN disabled_sides INTEGER DEFAULT 0");
+            } catch (SQLException ignored) {
+                // Column already exists (or table is new).
+            }
+
             // Markers table
             stmt.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS markers (
                     player TEXT NOT NULL,
+                    world TEXT,
                     ax INTEGER, ay INTEGER, az INTEGER,
                     bx INTEGER, by INTEGER, bz INTEGER
                 );
             """);
+
+            // Best-effort migration for dimension-aware markers.
+            try {
+                stmt.executeUpdate("ALTER TABLE markers ADD COLUMN world TEXT");
+            } catch (SQLException ignored) {
+                // Column already exists.
+            }
 
             // Unregistered controllers table (entity-only controllers placed but not finalized into a quarry)
             stmt.executeUpdate("""

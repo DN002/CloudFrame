@@ -106,13 +106,18 @@ public class Quarry {
         this.controller = controller;
         this.controllerYaw = controllerYaw;
 
-        // Start at the TOP of the region
-        this.currentX = region.minX();
-        this.currentZ = region.minZ();
+        // Start near the controller so the quarry can run immediately after a restart
+        // when the player is standing at the controller (instead of targeting an
+        // unloaded far-corner chunk).
+        int startX = clampToRange(controller.getBlockX(), region.minX(), region.maxX());
+        int startZ = clampToRange(controller.getBlockZ(), region.minZ(), region.maxZ());
+
+        this.currentX = startX;
+        this.currentZ = startZ;
         this.currentY = region.maxY();
 
-        this.scanX = region.minX();
-        this.scanZ = region.minZ();
+        this.scanX = startX;
+        this.scanZ = startZ;
         this.scanY = region.maxY();
 
         int layerCount = region.height();
@@ -155,13 +160,17 @@ public class Quarry {
         this.active = active;
 
         if (active) {
-            // Reset scan state
-            this.scanX = region.minX();
-            this.scanZ = region.minZ();
+            // Reset scan state near the controller so we don't immediately pick an
+            // unloaded far-corner chunk after restart.
+            int startX = clampToRange(controller.getBlockX(), region.minX(), region.maxX());
+            int startZ = clampToRange(controller.getBlockZ(), region.minZ(), region.maxZ());
+
+            this.scanX = startX;
+            this.scanZ = startZ;
             this.scanY = region.maxY();
 
-            this.currentX = region.minX();
-            this.currentZ = region.minZ();
+            this.currentX = startX;
+            this.currentZ = startZ;
             this.currentY = region.maxY();
 
             this.blocksMined = 0;
@@ -176,6 +185,10 @@ public class Quarry {
             computeTotalBlocks(); // fallback
 
             findNextBlockToMine(true);
+        } else {
+            // Ensure GUI state reflects paused.
+            this.isScanning = false;
+            this.scanningMetadata = false;
         }
     }
 
@@ -256,14 +269,39 @@ public class Quarry {
     }
 
     public boolean isChunkLoaded() {
-        boolean loaded = posA.getWorld().isChunkLoaded(
-                posA.getBlockX() >> 4,
-                posA.getBlockZ() >> 4
+        if (controller == null || controller.getWorld() == null) return false;
+
+        // Gate quarry ticking by controller chunk being loaded.
+        boolean controllerChunkLoaded = controller.getWorld().isChunkLoaded(
+            controller.getBlockX() >> 4,
+            controller.getBlockZ() >> 4
         );
-        if (!loaded) {
-            debug.log("isChunkLoaded", "Chunk not loaded for quarry owner=" + owner);
+        if (!controllerChunkLoaded) {
+            if (DebugFlags.STARTUP_LOAD_LOGGING) {
+                debug.log("isChunkLoaded", "Controller chunk not loaded for quarry owner=" + owner + " controller=" + controller);
+            }
+            return false;
         }
-        return loaded;
+
+        // Avoid force-loading chunks by reading blocks in an unloaded mining chunk.
+        boolean miningChunkLoaded = controller.getWorld().isChunkLoaded(
+            currentX >> 4,
+            currentZ >> 4
+        );
+        if (!miningChunkLoaded) {
+            if (DebugFlags.STARTUP_LOAD_LOGGING) {
+                debug.log("isChunkLoaded", "Mining chunk not loaded for quarry owner=" + owner + " at (" + currentX + "," + currentZ + ")");
+            }
+            return false;
+        }
+
+        return true;
+    }
+
+    private static int clampToRange(int value, int min, int max) {
+        if (value < min) return min;
+        if (value > max) return max;
+        return value;
     }
 
     public List<ItemStack> getOutputBuffer() {

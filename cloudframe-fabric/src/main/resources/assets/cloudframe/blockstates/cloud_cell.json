@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "cloudframe:block/cloud_cell" }
+  }
+}

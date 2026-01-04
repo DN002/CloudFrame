@@ -1,0 +1,6 @@
+{
+  "model": {
+    "type": "minecraft:model",
+    "model": "cloudframe:block/cloud_turbine"
+  }
+}

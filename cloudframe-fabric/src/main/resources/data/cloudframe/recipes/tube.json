@@ -1,0 +1,13 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    " C ",
+    " B ",
+    "   "
+  ],
+  "key": {
+    "C": { "item": "minecraft:copper_block" },
+    "B": { "item": "minecraft:blue_dye" }
+  },
+  "result": { "item": "cloudframe:tube", "count": 8 }
+}

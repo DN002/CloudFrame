@@ -1,0 +1,13 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    " D ",
+    " A ",
+    "   "
+  ],
+  "key": {
+    "D": { "item": "minecraft:diamond" },
+    "A": { "item": "cloudframe:speed_augment_2" }
+  },
+  "result": { "item": "cloudframe:speed_augment_3", "count": 1 }
+}

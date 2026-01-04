@@ -359,13 +359,16 @@ public class QuarryManager {
                 }
                 q.setOutputRoundRobin(outputRoundRobin);
 
+                // Always load as paused on startup. The saved 'active' state historically caused
+                // quarries to start scanning immediately after restart, which is surprising UX.
+                // Players can explicitly resume via the controller GUI.
                 boolean active = rs.getInt("active") == 1;
-                q.setActive(active);
+                q.setActive(false);
 
                 if (DebugFlags.STARTUP_LOAD_LOGGING) {
                     debug.log("loadAll", "Loaded quarry owner=" + owner +
                         " controller=" + controller +
-                        " active=" + active);
+                        " active(saved)=" + active + " active(loaded)=false");
                 }
 
                 // Migration cleanup: older versions used NOTE_BLOCKs for controllers.

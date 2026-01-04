@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "cloudframe:block/marker_block"
+    }
+  }
+}

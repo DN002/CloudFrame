@@ -1,7 +1,6 @@
 package dev.cloudframe.common.platform;
 
 import java.util.List;
-import java.util.UUID;
 
 /**
  * Platform-agnostic interface for entity spawning and management.
@@ -11,7 +10,7 @@ public interface EntityRenderer {
     
     /**
      * Spawn a visible 3D display entity at the given location.
-     * Used for tube arms, controller displays, etc.
+        * Used for pipe arms, controller displays, etc.
      */
     void spawnDisplayEntity(Object location, Object itemStack);
     

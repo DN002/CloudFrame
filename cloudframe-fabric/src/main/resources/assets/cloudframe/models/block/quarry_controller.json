@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/orientable",
+  "textures": {
+    "top": "cloudframe:item/quarry_controller",
+    "side": "cloudframe:item/quarry_controller",
+    "front": "cloudframe:item/quarry_controller_front"
+  }
+}

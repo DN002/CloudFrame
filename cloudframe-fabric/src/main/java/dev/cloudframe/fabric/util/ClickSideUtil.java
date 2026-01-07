@@ -1,6 +1,7 @@
 package dev.cloudframe.fabric.util;
 
 import dev.cloudframe.common.util.DirIndex;
+import dev.cloudframe.common.util.ArmClickUtil;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
@@ -21,6 +22,18 @@ public final class ClickSideUtil {
             case DOWN -> DirIndex.DOWN;
             case SOUTH -> DirIndex.SOUTH;
             case NORTH -> DirIndex.NORTH;
+        };
+    }
+
+    public static Direction fromDirIndex(int dirIndex, Direction fallback) {
+        return switch (dirIndex) {
+            case DirIndex.EAST -> Direction.EAST;
+            case DirIndex.WEST -> Direction.WEST;
+            case DirIndex.UP -> Direction.UP;
+            case DirIndex.DOWN -> Direction.DOWN;
+            case DirIndex.SOUTH -> Direction.SOUTH;
+            case DirIndex.NORTH -> Direction.NORTH;
+            default -> fallback;
         };
     }
 
@@ -45,26 +58,7 @@ public final class ClickSideUtil {
         double localY = hitPos.y - blockPos.getY();
         double localZ = hitPos.z - blockPos.getZ();
 
-        final double coreMin = 6.0 / 16.0;
-        final double coreMax = 10.0 / 16.0;
-
-        boolean inCoreY = localY >= coreMin && localY <= coreMax;
-        boolean inCoreZ = localZ >= coreMin && localZ <= coreMax;
-        boolean inCoreX = localX >= coreMin && localX <= coreMax;
-
-        if (inCoreY && inCoreZ) {
-            if (localX < coreMin) return Direction.WEST;
-            if (localX > coreMax) return Direction.EAST;
-        }
-        if (inCoreX && inCoreY) {
-            if (localZ < coreMin) return Direction.NORTH;
-            if (localZ > coreMax) return Direction.SOUTH;
-        }
-        if (inCoreX && inCoreZ) {
-            if (localY < coreMin) return Direction.DOWN;
-            if (localY > coreMax) return Direction.UP;
-        }
-
-        return fallbackFace;
+        int picked = ArmClickUtil.pickArmDirIndex(localX, localY, localZ, toDirIndex(fallbackFace));
+        return fromDirIndex(picked, fallbackFace);
     }
 }

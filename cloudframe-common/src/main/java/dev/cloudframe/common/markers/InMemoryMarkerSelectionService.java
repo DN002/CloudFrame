@@ -75,10 +75,20 @@ public final class InMemoryMarkerSelectionService implements MarkerSelectionServ
         corners.add(pos);
         int cornerNum = corners.size();
 
-        selections.put(playerId, new MarkerSelectionState(corners, expectedY, false, worldId));
-
+        // When the 4th corner is placed, ensure this is actually a rectangle frame and
+        // canonicalize the corners to bounds order so persistence is deterministic.
         if (corners.size() == 4) {
-            MarkerSelectionRepository.upsert(playerId, selections.get(playerId));
+            var canon = MarkerFrameCanonicalizer.canonicalize(corners, true);
+            if (!canon.ok()) {
+                selections.remove(playerId);
+                MarkerSelectionRepository.delete(playerId);
+                return -1;
+            }
+            MarkerSelectionState st = new MarkerSelectionState(canon.corners(), expectedY, false, worldId);
+            selections.put(playerId, st);
+            MarkerSelectionRepository.upsert(playerId, st);
+        } else {
+            selections.put(playerId, new MarkerSelectionState(corners, expectedY, false, worldId));
         }
 
         return cornerNum;
@@ -88,6 +98,7 @@ public final class InMemoryMarkerSelectionService implements MarkerSelectionServ
     public void clearCorners(UUID playerId) {
         if (playerId == null) return;
         selections.remove(playerId);
+        MarkerSelectionRepository.delete(playerId);
     }
 
     @Override
@@ -120,17 +131,19 @@ public final class InMemoryMarkerSelectionService implements MarkerSelectionServ
         if (playerId == null) return;
         if (corners == null || corners.size() != 4) {
             selections.remove(playerId);
+            MarkerSelectionRepository.delete(playerId);
             return;
         }
 
-        int y = corners.get(0).y();
-        List<MarkerPos> frozen = new ArrayList<>(4);
-        for (MarkerPos c : corners) {
-            if (c == null) continue;
-            frozen.add(new MarkerPos(c.x(), y, c.z()));
+        var canon = MarkerFrameCanonicalizer.canonicalize(corners, true);
+        if (!canon.ok()) {
+            selections.remove(playerId);
+            MarkerSelectionRepository.delete(playerId);
+            return;
         }
 
-        MarkerSelectionState st = new MarkerSelectionState(frozen, y, activated, worldId);
+        int y = canon.corners().get(0).y();
+        MarkerSelectionState st = new MarkerSelectionState(canon.corners(), y, activated, worldId);
         selections.put(playerId, st);
 
         if (persist) {

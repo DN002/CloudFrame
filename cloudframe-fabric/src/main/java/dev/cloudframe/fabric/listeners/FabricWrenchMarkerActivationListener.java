@@ -15,6 +15,9 @@ import net.minecraft.util.math.Vec3d;
 import java.util.ArrayList;
 import java.util.List;
 
+import dev.cloudframe.common.markers.MarkerFrameCanonicalizer;
+import dev.cloudframe.common.markers.MarkerPos;
+
 /**
  * Handles wrench right-click to activate marker frames.
  * Scans nearby blocks for placed markers (4 required on same Y level).
@@ -88,16 +91,24 @@ public class FabricWrenchMarkerActivationListener {
                 return ActionResult.SUCCESS;
             }
 
-            // Validate all on same Y level
-            int firstY = foundMarkers.get(0).getY();
-            for (BlockPos marker : foundMarkers) {
-                if (marker.getY() != firstY) {
-                    serverPlayer.sendMessage(
-                        net.minecraft.text.Text.literal("§cMarkers must be on same Y level."),
-                        false
-                    );
-                    return ActionResult.SUCCESS;
+            // Validate + canonicalize (must be true rectangle corners, and frame must enclose an inside area).
+            List<MarkerPos> raw = new ArrayList<>(4);
+            for (BlockPos p : foundMarkers) {
+                raw.add(new MarkerPos(p.getX(), p.getY(), p.getZ()));
+            }
+            var canon = MarkerFrameCanonicalizer.canonicalize(raw, true);
+            if (!canon.ok()) {
+                switch (canon.status()) {
+                    case NOT_SAME_Y -> serverPlayer.sendMessage(net.minecraft.text.Text.literal("§cMarkers must be on same Y level."), false);
+                    case TOO_SMALL -> serverPlayer.sendMessage(net.minecraft.text.Text.literal("§cMarker frame is too small. Make it at least 3x3 (inside area must exist)."), false);
+                    default -> serverPlayer.sendMessage(net.minecraft.text.Text.literal("§cMarkers must be placed at the 4 corners of a rectangle."), false);
                 }
+                return ActionResult.SUCCESS;
+            }
+
+            List<BlockPos> canonicalCorners = new ArrayList<>(4);
+            for (MarkerPos c : canon.corners()) {
+                canonicalCorners.add(new BlockPos(c.x(), c.y(), c.z()));
             }
 
             var manager = CloudFrameFabric.instance().getMarkerManager();
@@ -111,10 +122,10 @@ public class FabricWrenchMarkerActivationListener {
             }
 
             // Activate the frame
-            manager.setFrameFromBlocks(serverPlayer.getUuid(), (ServerWorld) world, foundMarkers);
+            manager.setFrameFromBlocks(serverPlayer.getUuid(), (ServerWorld) world, canonicalCorners);
 
             // Draw red particle lines connecting corners
-            drawFrameLines((ServerWorld) world, foundMarkers);
+            drawFrameLines((ServerWorld) world, canonicalCorners);
 
                 serverPlayer.sendMessage(
                     net.minecraft.text.Text.literal("§aFrame activated! Place the controller adjacent to the frame on the same Y level as the markers."),

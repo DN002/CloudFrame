@@ -23,6 +23,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.util.ItemScatterer;
 import net.minecraft.util.math.Vec3d;
 import dev.cloudframe.fabric.pipes.filter.PipeFilterItem;
+import dev.cloudframe.common.pipes.connections.PipeKey;
 
 public class WrenchItem extends Item {
 
@@ -55,7 +56,16 @@ public class WrenchItem extends Item {
         if (CloudFrameContent.getTubeBlock() != null && context.getWorld().getBlockState(clickedPos).isOf(CloudFrameContent.getTubeBlock())) {
             if (instance.getPipeManager() == null) return ActionResult.PASS;
 
-            var pipeNode = instance.getPipeManager().getPipe(GlobalPos.create(world.getRegistryKey(), clickedPos.toImmutable()));
+            if (instance.getPipeConnectionService() == null) return ActionResult.PASS;
+
+            GlobalPos pipeLoc = GlobalPos.create(world.getRegistryKey(), clickedPos.toImmutable());
+
+            var pipeNode = instance.getPipeManager().getPipe(pipeLoc);
+            if (pipeNode == null) {
+                // If the pipe cache is missing this placement, lazily index it.
+                instance.getPipeManager().addPipe(pipeLoc);
+                pipeNode = instance.getPipeManager().getPipe(pipeLoc);
+            }
             if (pipeNode == null) return ActionResult.PASS;
 
             // Determine which direction was clicked.
@@ -86,16 +96,43 @@ public class WrenchItem extends Item {
                 return ActionResult.SUCCESS;
             }
 
-            boolean wasDisabled = pipeNode.isInventorySideDisabled(dirIndex);
-            pipeNode.toggleInventorySideDisabled(dirIndex);
-            boolean nowDisabled = pipeNode.isInventorySideDisabled(dirIndex);
+            PipeKey key = new PipeKey(
+                world.getRegistryKey().getValue().toString(),
+                clickedPos.getX(),
+                clickedPos.getY(),
+                clickedPos.getZ()
+            );
+
+            boolean wasDisabled = instance.getPipeConnectionService().isSideDisabled(key, dirIndex);
+            instance.getPipeConnectionService().toggleSide(key, dirIndex);
+            int mask = instance.getPipeConnectionService().getDisabledSidesMask(key);
+            pipeNode.setDisabledInventorySides(mask);
+            boolean nowDisabled = instance.getPipeConnectionService().isSideDisabled(key, dirIndex);
+
+            // If toggling a pipe-to-pipe connection, also toggle the opposite side on the neighbor
+            if (CloudFrameContent.getTubeBlock() != null && neighborState != null && neighborState.isOf(CloudFrameContent.getTubeBlock())) {
+                int oppositeDir = getOppositeDirectionIndex(dirIndex);
+                PipeKey neighborKey = new PipeKey(
+                    world.getRegistryKey().getValue().toString(),
+                    neighborPos.getX(),
+                    neighborPos.getY(),
+                    neighborPos.getZ()
+                );
+                instance.getPipeConnectionService().toggleSide(neighborKey, oppositeDir);
+                
+                // Update neighbor pipe visuals
+                var neighborPipeNode = instance.getPipeManager().getPipe(GlobalPos.create(world.getRegistryKey(), neighborPos.toImmutable()));
+                if (neighborPipeNode != null) {
+                    int neighborMask = instance.getPipeConnectionService().getDisabledSidesMask(neighborKey);
+                    neighborPipeNode.setDisabledInventorySides(neighborMask);
+                }
+            }
 
             // If a wrench DISCONNECTS (disables) a side and it had a filter, drop the filter.
             if (!wasDisabled && nowDisabled && instance.getPipeFilterManager() != null) {
-                GlobalPos pipePos = GlobalPos.create(world.getRegistryKey(), clickedPos.toImmutable());
-                if (instance.getPipeFilterManager().hasFilter(pipePos, dirIndex)) {
-                    var st = instance.getPipeFilterManager().get(pipePos, dirIndex);
-                    instance.getPipeFilterManager().removeFilter(pipePos, dirIndex);
+                if (instance.getPipeFilterManager().hasFilter(pipeLoc, dirIndex)) {
+                    var st = instance.getPipeFilterManager().get(pipeLoc, dirIndex);
+                    instance.getPipeFilterManager().removeFilter(pipeLoc, dirIndex);
 
                     ItemStack drop = new ItemStack(CloudFrameContent.getPipeFilter(), 1);
                     PipeFilterItem.writeItemConfigFromFilterState(drop, st);
@@ -108,8 +145,6 @@ public class WrenchItem extends Item {
             
             // Rebuild pipe network to apply changes immediately
             instance.getPipeManager().rebuildAll();
-            
-            instance.getPipeManager().saveAll();
 
             // Update the tube's connection arms immediately (server -> client sync via blockstate).
             TubeBlock.refreshConnections(world, clickedPos);
@@ -118,7 +153,7 @@ public class WrenchItem extends Item {
             }
             
             // Give player feedback
-            boolean disabled = pipeNode.isInventorySideDisabled(dirIndex);
+            boolean disabled = instance.getPipeConnectionService().isSideDisabled(key, dirIndex);
             String dirName = switch (dirIndex) {
                 case 0 -> "East";
                 case 1 -> "West";
@@ -177,6 +212,13 @@ public class WrenchItem extends Item {
             GlobalPos cablePos = GlobalPos.create(world.getRegistryKey(), clickedPos.toImmutable());
             cableMgr.toggleSide(cablePos, dirIndex);
 
+            // If toggling a cable-to-cable connection, also toggle the opposite side on the neighbor
+            if (CloudFrameContent.getCloudCableBlock() != null && neighborState != null && neighborState.isOf(CloudFrameContent.getCloudCableBlock())) {
+                int oppositeDir = getOppositeDirectionIndex(dirIndex);
+                GlobalPos neighborCablePos = GlobalPos.create(world.getRegistryKey(), neighborPos.toImmutable());
+                cableMgr.toggleSide(neighborCablePos, oppositeDir);
+            }
+
             // Update cable connection arms immediately (server -> client sync via blockstate).
             CloudCableBlock.refreshConnections(world, clickedPos);
             if (CloudFrameContent.getCloudCableBlock() != null && neighborState != null && neighborState.isOf(CloudFrameContent.getCloudCableBlock())) {
@@ -213,6 +255,22 @@ public class WrenchItem extends Item {
             case DOWN -> 3;   // -Y
             case SOUTH -> 4;  // +Z
             case NORTH -> 5;  // -Z
+        };
+    }
+
+    /**
+     * Returns the opposite direction index.
+     * East (0) <-> West (1), Up (2) <-> Down (3), South (4) <-> North (5)
+     */
+    private static int getOppositeDirectionIndex(int dirIndex) {
+        return switch (dirIndex) {
+            case 0 -> 1;  // East -> West
+            case 1 -> 0;  // West -> East
+            case 2 -> 3;  // Up -> Down
+            case 3 -> 2;  // Down -> Up
+            case 4 -> 5;  // South -> North
+            case 5 -> 4;  // North -> South
+            default -> dirIndex;
         };
     }
 

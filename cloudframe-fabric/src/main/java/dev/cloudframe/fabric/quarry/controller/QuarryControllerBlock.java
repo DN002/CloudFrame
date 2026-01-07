@@ -1,9 +1,12 @@
 package dev.cloudframe.fabric.quarry.controller;
 
 import com.mojang.serialization.MapCodec;
+import dev.cloudframe.common.markers.MarkerFrameCanonicalizer;
+import dev.cloudframe.common.markers.MarkerPos;
 import dev.cloudframe.fabric.CloudFrameFabric;
 import dev.cloudframe.fabric.content.CloudFrameContent;
 import dev.cloudframe.common.quarry.Quarry;
+import dev.cloudframe.common.quarry.QuarryFramePlanner;
 import dev.cloudframe.common.util.Region;
 import net.minecraft.block.BlockRenderType;
 import net.minecraft.block.BlockState;
@@ -98,57 +101,39 @@ public class QuarryControllerBlock extends BlockWithEntity {
                     return ActionResult.SUCCESS;
                 }
 
-                // Calculate frame bounds
-                BlockPos first = corners.get(0);
-                int minX = first.getX();
-                int maxX = first.getX();
-                int minZ = first.getZ();
-                int maxZ = first.getZ();
-                int frameY = first.getY();
-
-                for (BlockPos corner : corners) {
-                    minX = Math.min(minX, corner.getX());
-                    maxX = Math.max(maxX, corner.getX());
-                    minZ = Math.min(minZ, corner.getZ());
-                    maxZ = Math.max(maxZ, corner.getZ());
+                // Delegate shared frame/controller validation + inner bounds computation to Common.
+                java.util.List<MarkerPos> markerCorners = new java.util.ArrayList<>(4);
+                for (BlockPos c : corners) {
+                    if (c == null) continue;
+                    markerCorners.add(new MarkerPos(c.getX(), c.getY(), c.getZ()));
                 }
 
-                // Mining region is INSIDE the marker corners (exclude the marker boundary).
-                int innerMinX = minX + 1;
-                int innerMaxX = maxX - 1;
-                int innerMinZ = minZ + 1;
-                int innerMaxZ = maxZ - 1;
+                QuarryFramePlanner.Result plan = QuarryFramePlanner.planFromMarkerCorners(
+                    markerCorners,
+                    pos.getX(),
+                    pos.getY(),
+                    pos.getZ()
+                );
 
-                if (innerMinX > innerMaxX || innerMinZ > innerMaxZ) {
-                    serverPlayer.sendMessage(net.minecraft.text.Text.literal("§cMarker frame is too small. Make it at least 3x3 (inside area must exist)."), false);
+                if (!plan.ok()) {
+                    if (plan.status == QuarryFramePlanner.Status.INVALID_FRAME && plan.frameStatus == MarkerFrameCanonicalizer.Status.TOO_SMALL) {
+                        serverPlayer.sendMessage(net.minecraft.text.Text.literal("§cMarker frame is too small. Make it at least 3x3 (inside area must exist)."), false);
+                    } else {
+                        serverPlayer.sendMessage(net.minecraft.text.Text.literal("§cController must be placed adjacent to the frame on the same Y level as the markers."), false);
+                    }
                     return ActionResult.SUCCESS;
                 }
 
-                // Validate controller is on the same Y level and placed OUTSIDE the marker frame (not inside/on it).
-                if (pos.getY() != frameY) {
-                    serverPlayer.sendMessage(net.minecraft.text.Text.literal("§cController must be placed adjacent to the frame on the same Y level as the markers."), false);
-                    return ActionResult.SUCCESS;
-                }
+                int minX = plan.frameMinX;
+                int maxX = plan.frameMaxX;
+                int minZ = plan.frameMinZ;
+                int maxZ = plan.frameMaxZ;
+                int frameY = plan.frameY;
 
-                int px = pos.getX();
-                int pz = pos.getZ();
-
-                // Disallow placing inside or on the marker rectangle.
-                boolean insideOrOnFrame = (px >= minX && px <= maxX && pz >= minZ && pz <= maxZ);
-                if (insideOrOnFrame) {
-                    serverPlayer.sendMessage(net.minecraft.text.Text.literal("§cController must be placed adjacent to the frame on the same Y level as the markers."), false);
-                    return ActionResult.SUCCESS;
-                }
-
-                // Require controller to be exactly 1 block outside the frame perimeter (non-diagonal adjacency).
-                boolean adjacentOutside =
-                    ((px == minX - 1 || px == maxX + 1) && (pz >= minZ && pz <= maxZ)) ||
-                    ((pz == minZ - 1 || pz == maxZ + 1) && (px >= minX && px <= maxX));
-
-                if (!adjacentOutside) {
-                    serverPlayer.sendMessage(net.minecraft.text.Text.literal("§cController must be placed adjacent to the frame on the same Y level as the markers."), false);
-                    return ActionResult.SUCCESS;
-                }
+                int innerMinX = plan.innerMinX;
+                int innerMaxX = plan.innerMaxX;
+                int innerMinZ = plan.innerMinZ;
+                int innerMaxZ = plan.innerMaxZ;
 
                 // Create region from frame bounds (full vertical column)
                 int topY = frameY;
@@ -208,7 +193,7 @@ public class QuarryControllerBlock extends BlockWithEntity {
                     );
                 }
 
-                instance.getQuarryManager().saveAll();
+                instance.getQuarryManager().saveQuarry(q);
                 instance.getMarkerManager().clearCorners(serverPlayer.getUuid());
 
                 serverPlayer.sendMessage(net.minecraft.text.Text.literal("§aQuarry registered successfully!"), false);

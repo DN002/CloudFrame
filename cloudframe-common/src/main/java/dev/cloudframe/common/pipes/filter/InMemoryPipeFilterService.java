@@ -59,10 +59,23 @@ public final class InMemoryPipeFilterService implements PipeFilterService {
         PipeFilterState st = getOrCreate(key);
         if (st == null) return;
 
-        if (itemIds == null) itemIds = new String[0];
+        String[] canonical = PipeFilterCanonicalizer.canonicalizeSlotItemIds(itemIds);
         for (int i = 0; i < PipeFilterState.SLOT_COUNT; i++) {
-            String id = i < itemIds.length ? itemIds[i] : null;
-            st.setItemId(i, id);
+            st.setItemId(i, canonical[i]);
+        }
+
+        PipeFilterRepository.upsert(key, st);
+    }
+
+    @Override
+    public void setConfig(PipeFilterKey key, PipeFilterConfig config) {
+        PipeFilterState st = getOrCreate(key);
+        if (st == null || config == null) return;
+
+        st.setMode(config.mode());
+        String[] ids = config.copyItemIds();
+        for (int i = 0; i < PipeFilterState.SLOT_COUNT; i++) {
+            st.setItemId(i, ids[i]);
         }
 
         PipeFilterRepository.upsert(key, st);

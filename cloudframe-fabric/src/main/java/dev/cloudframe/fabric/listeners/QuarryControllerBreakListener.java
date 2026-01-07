@@ -38,7 +38,7 @@ public class QuarryControllerBreakListener implements PlayerBlockBreakEvents.Bef
 
         // Deregister the quarry
         instance.getQuarryManager().remove(quarry);
-        instance.getQuarryManager().saveAll();
+        instance.getQuarryManager().deleteQuarry(quarry);
 
         if (player instanceof ServerPlayerEntity sp) {
             sp.sendMessage(net.minecraft.text.Text.literal("§cQuarry deregistered and removed."), true);

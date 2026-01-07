@@ -52,7 +52,7 @@ public class TrashCanScreenHandler extends ScreenHandler {
     }
 
     private void addPlayerSlots(PlayerInventory playerInventory) {
-        int playerInvY = 50;
+        int playerInvY = 49;
 
         // Player inventory (3 rows)
         for (int row = 0; row < 3; row++) {

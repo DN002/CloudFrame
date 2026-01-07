@@ -26,6 +26,18 @@ public interface PipeFilterService {
 
     void setItems(PipeFilterKey key, String[] itemIds);
 
+    /**
+     * Sets mode + items together as one logical update.
+     *
+     * Default implementation calls {@link #setMode(PipeFilterKey, int)} and {@link #setItems(PipeFilterKey, String[])}.
+     * Implementations may override to persist in a single write.
+     */
+    default void setConfig(PipeFilterKey key, PipeFilterConfig config) {
+        if (key == null || config == null) return;
+        setMode(key, config.mode());
+        setItems(key, config.copyItemIds());
+    }
+
     void remove(PipeFilterKey key);
 
     void removeAllAt(String worldId, int x, int y, int z);

@@ -42,6 +42,11 @@ public final class PipeOutputRouting {
             Object adj = platform.offset(baseLocation, DirIndex.dx(dirIndex), DirIndex.dy(dirIndex), DirIndex.dz(dirIndex));
             PipeNode node = pipes.getPipe(adj);
             if (node != null) {
+                // If the adjacent pipe has its face toward the base disabled, treat as not connected.
+                int towardBase = DirIndex.opposite(dirIndex);
+                if (towardBase >= 0 && node.isInventorySideDisabled(towardBase)) {
+                    continue;
+                }
                 return new AdjacentPipe(adj, node);
             }
         }

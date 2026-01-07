@@ -1,15 +1,17 @@
 package dev.cloudframe.fabric.pipes;
 
 import dev.cloudframe.common.pipes.filter.PipeFilterKey;
-import dev.cloudframe.common.pipes.filter.PipeFilterRepository;
+import dev.cloudframe.common.pipes.filter.PipeFilterConfig;
 import dev.cloudframe.common.pipes.filter.PipeFilterState;
 import dev.cloudframe.common.pipes.filter.PipeFilterService;
 import dev.cloudframe.common.pipes.filter.InMemoryPipeFilterService;
+import dev.cloudframe.common.pipes.filter.PipeFilterStackMapper;
+import dev.cloudframe.common.platform.items.ItemIdRegistry;
+import dev.cloudframe.fabric.platform.items.FabricItemIdRegistry;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
-import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
@@ -126,10 +128,12 @@ public final class FabricPipeFilterManager {
 
     private final MinecraftServer server;
     private final PipeFilterService service;
+    private final ItemIdRegistry<Item> itemIds;
 
     public FabricPipeFilterManager(MinecraftServer server) {
         this.server = server;
         this.service = new InMemoryPipeFilterService();
+        this.itemIds = FabricItemIdRegistry.INSTANCE;
     }
 
     public MinecraftServer getServer() {
@@ -185,8 +189,7 @@ public final class FabricPipeFilterManager {
 
     public boolean allows(GlobalPos pipePos, int sideIndex, ItemStack stack) {
         if (stack == null || stack.isEmpty()) return true;
-        Identifier id = Registries.ITEM.getId(stack.getItem());
-        String itemId = id == null ? null : id.toString();
+        String itemId = itemIds.idOf(stack.getItem());
         return service.allows(toPortableKey(pipePos, sideIndex), itemId);
     }
 
@@ -195,18 +198,25 @@ public final class FabricPipeFilterManager {
     }
 
     public void setItems(GlobalPos pipePos, int sideIndex, ItemStack[] stacks) {
-        if (stacks == null) stacks = new ItemStack[0];
-        String[] itemIds = new String[SLOT_COUNT];
-        for (int i = 0; i < SLOT_COUNT; i++) {
-            ItemStack s = i < stacks.length ? stacks[i] : ItemStack.EMPTY;
-            if (s == null || s.isEmpty()) {
-                itemIds[i] = null;
-            } else {
-                Identifier id = Registries.ITEM.getId(s.getItem());
-                itemIds[i] = id == null ? null : id.toString();
-            }
-        }
+        String[] itemIds = PipeFilterStackMapper.itemIdsFromStacks(
+            stacks,
+            s -> s == null || s.isEmpty(),
+            s -> s == null ? null : s.getItem(),
+            this.itemIds
+        );
         service.setItems(toPortableKey(pipePos, sideIndex), itemIds);
+    }
+
+    public void setConfig(GlobalPos pipePos, int sideIndex, int mode, ItemStack[] stacks) {
+        String[] itemIds = PipeFilterStackMapper.itemIdsFromStacks(
+            stacks,
+            s -> s == null || s.isEmpty(),
+            s -> s == null ? null : s.getItem(),
+            this.itemIds
+        );
+
+        PipeFilterConfig cfg = new PipeFilterConfig(mode, itemIds);
+        service.setConfig(toPortableKey(pipePos, sideIndex), cfg);
     }
 
     public void removeFilter(GlobalPos pipePos, int sideIndex) {
@@ -230,22 +240,13 @@ public final class FabricPipeFilterManager {
 
     private static ItemStack[] toItemStacks(PipeFilterState st) {
         ItemStack[] out = new ItemStack[SLOT_COUNT];
-        Arrays.fill(out, ItemStack.EMPTY);
-        if (st == null) return out;
-
-        String[] ids = st.copyItemIds();
-        for (int i = 0; i < Math.min(SLOT_COUNT, ids.length); i++) {
-            String id = ids[i];
-            if (id == null || id.isBlank()) continue;
-            try {
-                Item item = Registries.ITEM.get(Identifier.of(id.trim()));
-                if (item != null) {
-                    out[i] = new ItemStack(item, 1);
-                }
-            } catch (Throwable ignored) {
-                // ignore bad ids
-            }
-        }
+        PipeFilterStackMapper.fillStacksFromItemIds(
+            st == null ? null : st.copyItemIds(),
+            out,
+            () -> ItemStack.EMPTY,
+            item -> new ItemStack(item, 1),
+            FabricItemIdRegistry.INSTANCE
+        );
         return out;
     }
 }

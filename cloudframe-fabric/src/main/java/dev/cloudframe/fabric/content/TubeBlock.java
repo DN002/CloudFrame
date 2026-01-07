@@ -36,6 +36,8 @@ import dev.cloudframe.fabric.util.ClickSideUtil;
 import java.util.HashMap;
 import java.util.Map;
 
+import dev.cloudframe.common.pipes.connections.PipeKey;
+
 public class TubeBlock extends Block {
 
     public static final BooleanProperty NORTH = Properties.NORTH;
@@ -314,9 +316,6 @@ public class TubeBlock extends Block {
         MinecraftServer srv = w.getServer();
         if (srv == null) return false;
 
-        var node = instance.getPipeManager().getPipe(GlobalPos.create(w.getRegistryKey(), pipePos.toImmutable()));
-        if (node == null) return false;
-
         int dirIndex = switch (side) {
             case EAST -> 0;
             case WEST -> 1;
@@ -325,6 +324,19 @@ public class TubeBlock extends Block {
             case SOUTH -> 4;
             case NORTH -> 5;
         };
+
+        if (instance.getPipeConnectionService() != null) {
+            PipeKey key = new PipeKey(
+                w.getRegistryKey().getValue().toString(),
+                pipePos.getX(),
+                pipePos.getY(),
+                pipePos.getZ()
+            );
+            return instance.getPipeConnectionService().isSideDisabled(key, dirIndex);
+        }
+
+        var node = instance.getPipeManager().getPipe(GlobalPos.create(w.getRegistryKey(), pipePos.toImmutable()));
+        if (node == null) return false;
         return node.isInventorySideDisabled(dirIndex);
     }
 

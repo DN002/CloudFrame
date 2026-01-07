@@ -211,7 +211,14 @@ public interface QuarryPlatform {
         for (int dirIndex = 0; dirIndex < 6; dirIndex++) {
             Object adj = offset(ctrl, DirIndex.dx(dirIndex), DirIndex.dy(dirIndex), DirIndex.dz(dirIndex));
             var node = pipes.getPipe(adj);
-            if (node != null) { start = node; break; }
+            if (node != null) {
+                int towardController = DirIndex.opposite(dirIndex);
+                if (towardController >= 0 && node.isInventorySideDisabled(towardController)) {
+                    continue;
+                }
+                start = node;
+                break;
+            }
         }
         if (start == null) return false;
 

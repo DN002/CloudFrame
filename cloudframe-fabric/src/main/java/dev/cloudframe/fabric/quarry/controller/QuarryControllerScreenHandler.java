@@ -436,7 +436,7 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
                 q.setRedstoneMode(0);
 
                 if (inst != null && inst.getQuarryManager() != null) {
-                    inst.getQuarryManager().saveAll();
+                    inst.getQuarryManager().saveQuarry(q);
                 }
                 return true;
             }
@@ -446,7 +446,7 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
                 if (q != null) {
                     q.setRedstoneMode((q.getRedstoneMode() + 1) % 3);
                     if (inst != null && inst.getQuarryManager() != null) {
-                        inst.getQuarryManager().saveAll();
+                        inst.getQuarryManager().saveQuarry(q);
                     }
                     return true;
                 }
@@ -458,7 +458,7 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
                 if (q != null) {
                     q.setChunkLoadingEnabled(!q.isChunkLoadingEnabled());
                     if (inst != null && inst.getQuarryManager() != null) {
-                        inst.getQuarryManager().saveAll();
+                        inst.getQuarryManager().saveQuarry(q);
                     }
                     return true;
                 }
@@ -491,7 +491,7 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
                 if (q != null) {
                     q.setSilentMode(!q.isSilentMode());
                     if (inst != null && inst.getQuarryManager() != null) {
-                        inst.getQuarryManager().saveAll();
+                        inst.getQuarryManager().saveQuarry(q);
                     }
                     return true;
                 }
@@ -503,7 +503,7 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
                 if (q != null) {
                     q.setOutputRoundRobin(!q.isOutputRoundRobin());
                     if (inst != null && inst.getQuarryManager() != null) {
-                        inst.getQuarryManager().saveAll();
+                        inst.getQuarryManager().saveQuarry(q);
                     }
                     return true;
                 }
@@ -533,7 +533,7 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
                     // GUI removal doesn't trigger block-break events, so remove the frame explicitly.
                     q.removeGlassFrame();
                     inst.getQuarryManager().remove(q);
-                    inst.getQuarryManager().saveAll();
+                    inst.getQuarryManager().deleteQuarry(q);
                 }
 
                 // Close the UI, then remove the controller block.
@@ -644,7 +644,7 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
 
         q.setSilkTouchAugment(be.isSilkTouch());
         q.setSpeedAugmentLevel(be.getSpeedLevel());
-        inst.getQuarryManager().saveAll();
+        inst.getQuarryManager().saveQuarry(q);
     }
 
     private class AugmentSlot extends Slot {

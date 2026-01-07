@@ -9,6 +9,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import dev.cloudframe.common.quarry.QuarryPlatform;
 import dev.cloudframe.common.pipes.ItemPacketManager;
 import dev.cloudframe.common.pipes.PipeNetworkManager;
+import dev.cloudframe.common.pipes.PipeConnectivityAccess;
+import dev.cloudframe.common.pipes.PipeOutputScanner;
 import dev.cloudframe.common.platform.items.InventoryCapacity;
 import dev.cloudframe.common.platform.items.InventoryInsert;
 import dev.cloudframe.common.platform.items.ItemStackKeyAdapter;
@@ -18,9 +20,10 @@ import dev.cloudframe.common.platform.world.LocationNormalizationPolicy;
 import dev.cloudframe.common.platform.world.WorldKeyAdapter;
 import dev.cloudframe.common.util.Debug;
 import dev.cloudframe.common.util.DebugManager;
+import dev.cloudframe.common.util.RectPerimeter;
+import dev.cloudframe.common.quarry.DefaultItemPacketFactory;
 import dev.cloudframe.fabric.CloudFrameFabric;
 import dev.cloudframe.fabric.content.TubeBlock;
-import dev.cloudframe.fabric.pipes.FabricPacketService;
 import dev.cloudframe.fabric.pipes.FabricItemStackAdapter;
 import dev.cloudframe.fabric.power.FabricPowerNetworkManager;
 import dev.cloudframe.fabric.content.CloudFrameContent;
@@ -60,7 +63,6 @@ public class FabricQuarryPlatform implements QuarryPlatform {
     private final MinecraftServer server;
     private final PipeNetworkManager pipeManager;
     private final ItemPacketManager packetManager;
-    private final FabricPacketService packetService;
 
     private static final int MAX_GLASS_FRAME_UPDATES_PER_TICK = 256;
 
@@ -98,9 +100,8 @@ public class FabricQuarryPlatform implements QuarryPlatform {
         final int maxZ;
         final int y;
 
-        // Perimeter iteration state.
-        int stage = 0;
-        int cursor = 0;
+        final int total;
+        int index = 0;
 
         GlassFrameRemovalJob(RegistryKey<World> worldKey, int minX, int minZ, int maxX, int maxZ, int y) {
             this.worldKey = worldKey;
@@ -109,6 +110,8 @@ public class FabricQuarryPlatform implements QuarryPlatform {
             this.minZ = Math.min(minZ, maxZ);
             this.maxZ = Math.max(minZ, maxZ);
             this.y = y;
+
+            this.total = RectPerimeter.count(this.minX, this.minZ, this.maxX, this.maxZ);
         }
     }
 
@@ -116,7 +119,6 @@ public class FabricQuarryPlatform implements QuarryPlatform {
         this.server = server;
         this.pipeManager = pipeManager;
         this.packetManager = packetManager;
-        this.packetService = new FabricPacketService(packetManager, server);
     }
 
     @Override
@@ -169,78 +171,80 @@ public class FabricQuarryPlatform implements QuarryPlatform {
 
     @Override
     public boolean hasValidOutput(Object controllerLoc) {
-        if (controllerLoc == null) return false;
-
-        // Fast path: direct adjacent inventory.
-        for (Direction dir : Direction.values()) {
-            Object adj = offset(controllerLoc, dir.getOffsetX(), dir.getOffsetY(), dir.getOffsetZ());
-            if (adj == null) continue;
-            if (isInventory(adj)) return true;
-        }
-
-        // Pipe path: scan the actual in-world tube connectivity so disconnected sides
-        // (via wrench toggles) cannot be reported as valid output.
         if (!(controllerLoc instanceof GlobalPos gp)) return false;
-        ServerWorld world = server.getWorld(gp.dimension());
-        if (world == null) return false;
-
         if (CloudFrameContent.getTubeBlock() == null) return false;
-        if (CloudFrameContent.getQuarryControllerBlock() == null) return false;
 
-        final int limit = 8192;
-        java.util.ArrayDeque<BlockPos> queue = new java.util.ArrayDeque<>();
-        java.util.HashSet<BlockPos> visited = new java.util.HashSet<>();
-
-        BlockPos controllerPos = gp.pos();
-
-        // Seed BFS with tube blocks that are actually connected to the controller.
-        for (Direction dir : Direction.values()) {
-            BlockPos tubePos = controllerPos.offset(dir);
-            if (!world.isChunkLoaded(tubePos.getX() >> 4, tubePos.getZ() >> 4)) continue;
-
-            BlockState tubeState = world.getBlockState(tubePos);
-            if (!tubeState.isOf(CloudFrameContent.getTubeBlock())) continue;
-
-            // The tube must expose an arm facing back to the controller.
-            if (!tubeConnects(tubeState, dir.getOpposite())) continue;
-
-            queue.add(tubePos.toImmutable());
-        }
-
-        while (!queue.isEmpty() && visited.size() < limit) {
-            BlockPos tubePos = queue.pollFirst();
-            if (tubePos == null) continue;
-            tubePos = tubePos.toImmutable();
-            if (!visited.add(tubePos)) continue;
-
-            if (!world.isChunkLoaded(tubePos.getX() >> 4, tubePos.getZ() >> 4)) continue;
-            BlockState tubeState = world.getBlockState(tubePos);
-            if (!tubeState.isOf(CloudFrameContent.getTubeBlock())) continue;
-
-            for (Direction dir : Direction.values()) {
-                if (!tubeConnects(tubeState, dir)) continue;
-
-                BlockPos neighborPos = tubePos.offset(dir);
-                if (!world.isChunkLoaded(neighborPos.getX() >> 4, neighborPos.getZ() >> 4)) continue;
-
-                BlockState neighborState = world.getBlockState(neighborPos);
-                if (neighborState.isOf(CloudFrameContent.getTubeBlock())) {
-                    // Require the neighbor tube to connect back.
-                    if (tubeConnects(neighborState, dir.getOpposite())) {
-                        queue.add(neighborPos.toImmutable());
-                    }
-                    continue;
+        PipeConnectivityAccess access = new PipeConnectivityAccess() {
+            @Override
+            public Object normalize(Object loc) {
+                if (loc instanceof GlobalPos p) {
+                    return GlobalPos.create(p.dimension(), p.pos().toImmutable());
                 }
-
-                // Any reachable inventory means output is valid.
-                BlockEntity be = world.getBlockEntity(neighborPos);
-                if (be instanceof Inventory) {
-                    return true;
-                }
+                return loc;
             }
-        }
 
-        return false;
+            @Override
+            public boolean isChunkLoaded(Object loc) {
+                if (!(loc instanceof GlobalPos p)) return false;
+                ServerWorld w = server.getWorld(p.dimension());
+                if (w == null) return false;
+                BlockPos pos = p.pos();
+                return w.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4);
+            }
+
+            @Override
+            public Object offset(Object loc, int dirIndex) {
+                if (!(loc instanceof GlobalPos p)) return null;
+                Direction dir = dirFromIndex(dirIndex);
+                if (dir == null) return null;
+                return GlobalPos.create(p.dimension(), p.pos().offset(dir).toImmutable());
+            }
+
+            @Override
+            public boolean isPipeAt(Object loc) {
+                if (!(loc instanceof GlobalPos p)) return false;
+                ServerWorld w = server.getWorld(p.dimension());
+                if (w == null) return false;
+                if (!isChunkLoaded(p)) return false;
+                return w.getBlockState(p.pos()).isOf(CloudFrameContent.getTubeBlock());
+            }
+
+            @Override
+            public boolean pipeConnects(Object pipeLoc, int dirIndex) {
+                if (!(pipeLoc instanceof GlobalPos p)) return false;
+                ServerWorld w = server.getWorld(p.dimension());
+                if (w == null) return false;
+                if (!isChunkLoaded(p)) return false;
+                BlockState state = w.getBlockState(p.pos());
+                if (!state.isOf(CloudFrameContent.getTubeBlock())) return false;
+                Direction dir = dirFromIndex(dirIndex);
+                return dir != null && tubeConnects(state, dir);
+            }
+
+            @Override
+            public boolean isInventoryAt(Object loc) {
+                if (!(loc instanceof GlobalPos p)) return false;
+                ServerWorld w = server.getWorld(p.dimension());
+                if (w == null) return false;
+                if (!isChunkLoaded(p)) return false;
+                BlockEntity be = w.getBlockEntity(p.pos());
+                return be instanceof Inventory;
+            }
+
+            private Direction dirFromIndex(int dirIndex) {
+                return switch (dirIndex) {
+                    case 0 -> Direction.EAST;
+                    case 1 -> Direction.WEST;
+                    case 2 -> Direction.UP;
+                    case 3 -> Direction.DOWN;
+                    case 4 -> Direction.SOUTH;
+                    case 5 -> Direction.NORTH;
+                    default -> null;
+                };
+            }
+        };
+
+        return PipeOutputScanner.hasValidOutputFrom(gp, access, 8192);
     }
 
     private static boolean tubeConnects(BlockState tubeState, Direction dir) {
@@ -372,11 +376,19 @@ public class FabricQuarryPlatform implements QuarryPlatform {
                 continue;
             }
 
-            BlockPos next = nextPerimeterPos(job);
-            if (next == null) {
+            if (job.total <= 0 || job.index >= job.total) {
                 pendingFrameRemovals.pollFirst();
                 continue;
             }
+
+            RectPerimeter.Pos nextXZ = RectPerimeter.at(job.minX, job.minZ, job.maxX, job.maxZ, job.index);
+            job.index++;
+            if (nextXZ == null) {
+                pendingFrameRemovals.pollFirst();
+                continue;
+            }
+
+            BlockPos next = new BlockPos(nextXZ.x(), job.y, nextXZ.z());
 
             // Force-load chunk so removal is reliable after restarts / large frames.
             int cx = next.getX() >> 4;
@@ -390,60 +402,6 @@ public class FabricQuarryPlatform implements QuarryPlatform {
             }
             budget--;
         }
-    }
-
-    /**
-     * Returns the next perimeter BlockPos to process, or null when job is complete.
-     */
-    private BlockPos nextPerimeterPos(GlassFrameRemovalJob job) {
-        int width = job.maxX - job.minX;
-        int depth = job.maxZ - job.minZ;
-
-        // Degenerate cases (line/point): just scan the rectangle edge logic safely.
-        if (width < 0 || depth < 0) return null;
-
-        // stage 0: top edge (z=minZ), x=minX..maxX
-        // stage 1: bottom edge (z=maxZ), x=minX..maxX
-        // stage 2: left edge (x=minX), z=minZ+1..maxZ-1
-        // stage 3: right edge (x=maxX), z=minZ+1..maxZ-1
-        while (job.stage <= 3) {
-            switch (job.stage) {
-                case 0 -> {
-                    int x = job.minX + job.cursor;
-                    if (x > job.maxX) { job.stage++; job.cursor = 0; continue; }
-                    job.cursor++;
-                    return new BlockPos(x, job.y, job.minZ);
-                }
-                case 1 -> {
-                    int x = job.minX + job.cursor;
-                    if (x > job.maxX) { job.stage++; job.cursor = 0; continue; }
-                    job.cursor++;
-                    // If minZ == maxZ, stage 0 already covered this line.
-                    if (job.minZ == job.maxZ) continue;
-                    return new BlockPos(x, job.y, job.maxZ);
-                }
-                case 2 -> {
-                    int z = (job.minZ + 1) + job.cursor;
-                    if (z >= job.maxZ) { job.stage++; job.cursor = 0; continue; }
-                    job.cursor++;
-                    // If minX == maxX, this edge is already covered by top/bottom edges.
-                    if (job.minX == job.maxX) continue;
-                    return new BlockPos(job.minX, job.y, z);
-                }
-                case 3 -> {
-                    int z = (job.minZ + 1) + job.cursor;
-                    if (z >= job.maxZ) { job.stage++; job.cursor = 0; continue; }
-                    job.cursor++;
-                    if (job.minX == job.maxX) continue;
-                    return new BlockPos(job.maxX, job.y, z);
-                }
-                default -> {
-                    return null;
-                }
-            }
-        }
-
-        return null;
     }
 
     @Override
@@ -822,13 +780,11 @@ public class FabricQuarryPlatform implements QuarryPlatform {
 
     @Override
     public ItemPacketFactory packetFactory() {
-        return new ItemPacketFactory() {
-            @Override
-            public void send(Object itemStack, List<Object> waypoints, Object destinationInventory, DeliveryCallback callback) {
-                if (!(itemStack instanceof ItemStack stack)) return;
-                packetService.enqueue(stack, waypoints, destinationInventory, callback);
-            }
-        };
+        return new DefaultItemPacketFactory(
+                packetManager,
+                () -> new dev.cloudframe.fabric.pipes.FabricPacketVisuals(server),
+                FabricItemStackAdapter.INSTANCE
+        );
     }
 
     @Override
@@ -846,12 +802,12 @@ public class FabricQuarryPlatform implements QuarryPlatform {
         int y = maxY;
         int lastCx = Integer.MIN_VALUE;
         int lastCz = Integer.MIN_VALUE;
-        for (int x = minX; x <= maxX; x++) {
-            for (int z = minZ; z <= maxZ; z++) {
-                boolean onEdge = (x == minX || x == maxX || z == minZ || z == maxZ);
-                if (!onEdge) continue;
+        int total = RectPerimeter.count(minX, minZ, maxX, maxZ);
+        for (int i = 0; i < total; i++) {
+            RectPerimeter.Pos xz = RectPerimeter.at(minX, minZ, maxX, maxZ, i);
+            if (xz == null) continue;
 
-                BlockPos pos = new BlockPos(x, y, z);
+            BlockPos pos = new BlockPos(xz.x(), y, xz.z());
 
                 // Ensure the chunk is loaded so the frame is consistently placed.
                 int cx = pos.getX() >> 4;
@@ -869,7 +825,6 @@ public class FabricQuarryPlatform implements QuarryPlatform {
                     world.setBlockState(pos, net.minecraft.block.Blocks.GLASS.getDefaultState(), 3);
                     placedCount++;
                 }
-            }
         }
         dev.cloudframe.common.util.DebugManager.get(FabricQuarryPlatform.class).log(
             "placeGlassFrame", 

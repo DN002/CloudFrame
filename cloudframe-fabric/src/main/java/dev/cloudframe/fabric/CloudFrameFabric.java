@@ -12,6 +12,8 @@ import dev.cloudframe.common.pipes.PipeNetworkManager;
 import dev.cloudframe.common.quarry.QuarryManager;
 import dev.cloudframe.common.quarry.QuarryPlatform;
 import dev.cloudframe.common.power.cables.InMemoryCableConnectionService;
+import dev.cloudframe.common.pipes.connections.InMemoryPipeConnectionService;
+import dev.cloudframe.common.pipes.connections.PipeConnectionService;
 import dev.cloudframe.fabric.commands.CloudFrameCommands;
 import dev.cloudframe.fabric.quarry.FabricQuarryPlatform;
 import dev.cloudframe.fabric.content.CloudFrameContent;
@@ -60,6 +62,7 @@ public class CloudFrameFabric implements ModInitializer {
     private FabricMarkerManager markerManager;
     private dev.cloudframe.fabric.power.FabricCableConnectionManager cableConnectionManager;
     private dev.cloudframe.fabric.pipes.FabricPipeFilterManager pipeFilterManager;
+    private PipeConnectionService pipeConnectionService;
     private MinecraftServer server;
     private boolean commandsRegistered = false;
     private int tickCounter = 0;
@@ -268,6 +271,10 @@ public class CloudFrameFabric implements ModInitializer {
 
         pipeManager.loadAll();
         debug.log("onServerStarted", "Pipes loaded from database");
+
+        pipeConnectionService = new InMemoryPipeConnectionService();
+        pipeConnectionService.loadAll();
+        debug.log("onServerStarted", "PipeConnectionService initialized");
         
         quarryManager.loadAll();
         debug.log("onServerStarted", "Quarries loaded from database");
@@ -354,32 +361,22 @@ public class CloudFrameFabric implements ModInitializer {
         }
 
         if (changed) {
-            quarryManager.saveAll();
+            // Migration complete; all quarries already persisted via targeted saveQuarry().
             debug.log("migrate", "Quarry region migration complete; database updated.");
         }
     }
 
     private void onServerStopping(MinecraftServer server) {
         debug.log("onServerStopping", "Server stopping, saving data...");
-        debug.log("onServerStopping", "Server stopping, saving data...");
 
-        if (pipeManager != null) {
-            pipeManager.saveAll();
-            debug.log("onServerStopping", "Pipes saved");
-        }
-        if (quarryManager != null) {
-            quarryManager.saveAll();
-            debug.log("onServerStopping", "Quarries saved");
-        }
-
-        if (markerManager != null) {
-            markerManager.saveAll();
-        }
+        // All persistence is now write-through (not batched at shutdown):
+        // - Quarries: persisted via saveQuarry() on every GUI toggle
+        // - Markers: persisted via upsert/delete on every corner add/clear
+        // - Pipes: loaded once on startup and not mutated during gameplay
+        // No saveAll() calls needed.
 
         Database.close();
         debug.log("onServerStopping", "Database closed");
-
-        debug.log("onServerStopping", "Data saved and database closed.");
     }
 
     private void onServerTick(MinecraftServer server) {
@@ -492,6 +489,10 @@ public class CloudFrameFabric implements ModInitializer {
 
     public dev.cloudframe.fabric.pipes.FabricPipeFilterManager getPipeFilterManager() {
         return pipeFilterManager;
+    }
+
+    public PipeConnectionService getPipeConnectionService() {
+        return pipeConnectionService;
     }
 
     public static CloudFrameFabric instance() {

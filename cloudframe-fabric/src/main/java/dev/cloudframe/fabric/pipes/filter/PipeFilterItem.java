@@ -16,9 +16,7 @@ import net.minecraft.nbt.NbtList;
 import net.minecraft.nbt.NbtString;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.NbtComponent;
-import net.minecraft.registry.Registries;
 import net.minecraft.util.Hand;
-import net.minecraft.util.Identifier;
 import net.minecraft.screen.NamedScreenHandlerFactory;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
@@ -29,6 +27,10 @@ import net.minecraft.util.math.GlobalPos;
 import net.minecraft.world.World;
 
 import java.util.List;
+
+import dev.cloudframe.fabric.platform.items.FabricItemIdRegistry;
+import dev.cloudframe.common.pipes.filter.PipeFilterConfig;
+import dev.cloudframe.common.pipes.filter.PipeFilterState;
 
 public class PipeFilterItem extends Item {
 
@@ -160,27 +162,48 @@ public class PipeFilterItem extends Item {
 
         mode = root.getInt(NBT_MODE).orElse(mode);
 
+        String[] rawIds = new String[PipeFilterState.SLOT_COUNT];
+        for (int i = 0; i < rawIds.length; i++) rawIds[i] = null;
+
         if (root.contains(NBT_ITEMS)) {
             NbtList list = root.getList(NBT_ITEMS).orElse(new NbtList());
-            for (int i = 0; i < Math.min(items.length, list.size()); i++) {
+            for (int i = 0; i < Math.min(rawIds.length, list.size()); i++) {
                 String id = list.getString(i).orElse("");
-                if (id == null || id.isBlank()) continue;
-                try {
-                    var item = Registries.ITEM.get(Identifier.of(id.trim()));
-                    if (item != null) {
-                        items[i] = new ItemStack(item, 1);
-                    }
-                } catch (Throwable ignored) {
-                    // ignore
-                }
+                rawIds[i] = (id == null || id.isBlank()) ? null : id;
             }
         }
 
-        return new ItemConfig(mode, items);
+        PipeFilterConfig cfg = new PipeFilterConfig(mode, rawIds);
+
+        // Convert canonical ids back into stacks.
+        String[] ids = cfg.copyItemIds();
+        for (int i = 0; i < Math.min(items.length, ids.length); i++) {
+            String id = ids[i];
+            if (id == null || id.isBlank()) continue;
+            try {
+                var item = FabricItemIdRegistry.INSTANCE.itemById(id);
+                if (item != null) items[i] = new ItemStack(item, 1);
+            } catch (Throwable ignored) {
+                // ignore
+            }
+        }
+
+        return new ItemConfig(cfg.mode(), items);
     }
 
-    public static void writeItemConfig(ItemStack stack, int mode, ItemStack[] items) {
-        if (stack == null) return;
+    public static PipeFilterConfig toConfig(int mode, ItemStack[] items) {
+        // Convert stacks -> ids, then canonicalize in Common so semantics match across platforms.
+        String[] rawIds = new String[PipeFilterState.SLOT_COUNT];
+        for (int i = 0; i < rawIds.length; i++) {
+            ItemStack s = (items != null && i < items.length) ? items[i] : ItemStack.EMPTY;
+            rawIds[i] = (s == null || s.isEmpty()) ? null : FabricItemIdRegistry.INSTANCE.idOf(s.getItem());
+        }
+
+        return new PipeFilterConfig(mode, rawIds);
+    }
+
+    public static void writeItemConfig(ItemStack stack, PipeFilterConfig cfg) {
+        if (stack == null || cfg == null) return;
 
         NbtCompound nbt = getCustomDataNbt(stack);
         if (nbt == null) {
@@ -189,27 +212,22 @@ public class PipeFilterItem extends Item {
 
         NbtCompound root = nbt.getCompound(NBT_ROOT).orElse(new NbtCompound());
 
-        int safeMode = (mode == dev.cloudframe.fabric.pipes.FabricPipeFilterManager.MODE_BLACKLIST)
-            ? dev.cloudframe.fabric.pipes.FabricPipeFilterManager.MODE_BLACKLIST
-            : dev.cloudframe.fabric.pipes.FabricPipeFilterManager.MODE_WHITELIST;
-
-        root.putInt(NBT_MODE, safeMode);
+        root.putInt(NBT_MODE, cfg.mode());
 
         NbtList list = new NbtList();
-        int max = dev.cloudframe.fabric.pipes.FabricPipeFilterManager.SLOT_COUNT;
-        for (int i = 0; i < max; i++) {
-            ItemStack s = (items != null && i < items.length) ? items[i] : ItemStack.EMPTY;
-            if (s == null || s.isEmpty()) {
-                list.add(NbtString.of(""));
-            } else {
-                Identifier id = Registries.ITEM.getId(s.getItem());
-                list.add(NbtString.of(id == null ? "" : id.toString()));
-            }
+        String[] ids = cfg.copyItemIds();
+        for (int i = 0; i < ids.length; i++) {
+            String id = ids[i];
+            list.add(NbtString.of(id == null ? "" : id));
         }
         root.put(NBT_ITEMS, list);
 
         nbt.put(NBT_ROOT, root);
         setCustomDataNbt(stack, nbt);
+    }
+
+    public static void writeItemConfig(ItemStack stack, int mode, ItemStack[] items) {
+        writeItemConfig(stack, toConfig(mode, items));
     }
 
     public static void writeItemConfigFromFilterState(ItemStack stack, dev.cloudframe.fabric.pipes.FabricPipeFilterManager.FilterState state) {

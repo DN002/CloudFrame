@@ -386,6 +386,9 @@ public class PipeNetworkManager {
             }
         });
 
+        // Ensure in-memory neighbors reflect persisted disabled sides.
+        rebuildAll();
+
         debug.log("loadAll", "Finished loading pipes");
     }
 

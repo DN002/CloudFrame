@@ -68,7 +68,7 @@ public class PipeFilterScreenHandler extends ScreenHandler {
         delegate.set(0, cfg.mode);
 
         PipeFilterInventory inv = new PipeFilterInventory(FabricPipeFilterManager.SLOT_COUNT, () -> {
-            PipeFilterItem.writeItemConfig(this.editingItemStack, delegate.get(0), copyFilterItems());
+            PipeFilterItem.writeItemConfig(this.editingItemStack, PipeFilterItem.toConfig(delegate.get(0), copyFilterItems()));
         });
 
         // Avoid firing markDirty callbacks while we are still populating initial slot contents.
@@ -105,7 +105,7 @@ public class PipeFilterScreenHandler extends ScreenHandler {
 
         PipeFilterInventory inv = new PipeFilterInventory(FabricPipeFilterManager.SLOT_COUNT, () -> {
             if (this.filterManager != null && this.pipePos != null && this.sideIndex >= 0) {
-                this.filterManager.setItems(this.pipePos, this.sideIndex, copyFilterItems());
+                this.filterManager.setConfig(this.pipePos, this.sideIndex, getMode(), copyFilterItems());
             }
         });
 
@@ -222,9 +222,9 @@ public class PipeFilterScreenHandler extends ScreenHandler {
             properties.set(0, nextMode);
 
             if (editingItem) {
-                PipeFilterItem.writeItemConfig(this.editingItemStack, nextMode, copyFilterItems());
+                PipeFilterItem.writeItemConfig(this.editingItemStack, PipeFilterItem.toConfig(nextMode, copyFilterItems()));
             } else if (filterManager != null && pipePos != null && sideIndex >= 0) {
-                filterManager.setMode(pipePos, sideIndex, nextMode);
+                filterManager.setConfig(pipePos, sideIndex, nextMode, copyFilterItems());
             }
 
             return true;

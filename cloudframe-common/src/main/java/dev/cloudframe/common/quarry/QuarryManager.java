@@ -54,42 +54,107 @@ public class QuarryManager {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """);
             for (Quarry q : quarries) {
-                Object ctrl = q.getController();
-                Object world = platform.worldOf(ctrl);
-                ps.setString(1, q.getOwner().toString());
-                ps.setString(2, q.getOwnerName());
-                ps.setString(3, world != null ? platform.worldName(world) : "");
-                ps.setInt(4, platform.blockX(q.getPosA()));
-                ps.setInt(5, platform.blockY(q.getPosA()));
-                ps.setInt(6, platform.blockZ(q.getPosA()));
-                ps.setInt(7, platform.blockX(q.getPosB()));
-                ps.setInt(8, platform.blockY(q.getPosB()));
-                ps.setInt(9, platform.blockZ(q.getPosB()));
-                ps.setInt(10, platform.blockX(ctrl));
-                ps.setInt(11, platform.blockY(ctrl));
-                ps.setInt(12, platform.blockZ(ctrl));
-                ps.setInt(13, q.isActive() ? 1 : 0);
-                ps.setInt(14, q.getControllerYaw());
-                ps.setInt(15, q.hasSilkTouchAugment() ? 1 : 0);
-                ps.setInt(16, Math.max(0, q.getSpeedAugmentLevel()));
-                ps.setInt(17, q.isOutputRoundRobin() ? 1 : 0);
-                ps.setInt(18, q.getRedstoneMode());
-                ps.setInt(19, q.isChunkLoadingEnabled() ? 1 : 0);
-                ps.setInt(20, q.isSilentMode() ? 1 : 0);
-                ps.setInt(21, q.frameMinX());
-                ps.setInt(22, q.frameMinZ());
-                ps.setInt(23, q.frameMaxX());
-                ps.setInt(24, q.frameMaxZ());
+                bindQuarryInsert(ps, q);
                 ps.addBatch();
             }
             ps.executeBatch();
         });
     }
 
+    /**
+     * Persist a single quarry row (identified by controller location) without rewriting the full table.
+     * This keeps UI toggles efficient and reduces cross-platform drift.
+     */
+    public void saveQuarry(Quarry q) {
+        if (q == null) return;
+        Object ctrl = q.getController();
+        if (ctrl == null) return;
+
+        Database.run(conn -> {
+            Object world = platform.worldOf(ctrl);
+            String worldName = world != null ? platform.worldName(world) : "";
+            int cx = platform.blockX(ctrl);
+            int cy = platform.blockY(ctrl);
+            int cz = platform.blockZ(ctrl);
+
+            // Table has no PRIMARY KEY; enforce uniqueness by controller location.
+            var del = conn.prepareStatement("DELETE FROM quarries WHERE world = ? AND controllerX = ? AND controllerY = ? AND controllerZ = ?");
+            del.setString(1, worldName);
+            del.setInt(2, cx);
+            del.setInt(3, cy);
+            del.setInt(4, cz);
+            del.executeUpdate();
+
+            var ins = conn.prepareStatement("""
+                INSERT INTO quarries
+                (owner, ownerName, world, ax, ay, az, bx, by, bz, controllerX, controllerY, controllerZ, active, controllerYaw, silkTouch, speedLevel, outputRoundRobin, redstoneMode, chunkLoadingEnabled, silentMode, frameMinX, frameMinZ, frameMaxX, frameMaxZ)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """);
+            bindQuarryInsert(ins, q);
+            ins.executeUpdate();
+        });
+    }
+
+    /** Delete a single quarry row (identified by controller location). */
+    public void deleteQuarry(Quarry q) {
+        if (q == null) return;
+        Object ctrl = q.getController();
+        if (ctrl == null) return;
+        deleteQuarryByController(ctrl);
+    }
+
+    /** Delete a single quarry row (identified by controller location). */
+    public void deleteQuarryByController(Object controllerLoc) {
+        if (controllerLoc == null) return;
+        Object world = platform.worldOf(controllerLoc);
+        String worldName = world != null ? platform.worldName(world) : "";
+        int cx = platform.blockX(controllerLoc);
+        int cy = platform.blockY(controllerLoc);
+        int cz = platform.blockZ(controllerLoc);
+
+        Database.run(conn -> {
+            var del = conn.prepareStatement("DELETE FROM quarries WHERE world = ? AND controllerX = ? AND controllerY = ? AND controllerZ = ?");
+            del.setString(1, worldName);
+            del.setInt(2, cx);
+            del.setInt(3, cy);
+            del.setInt(4, cz);
+            del.executeUpdate();
+        });
+    }
+
+    private void bindQuarryInsert(java.sql.PreparedStatement ps, Quarry q) throws java.sql.SQLException {
+        Object ctrl = q.getController();
+        Object world = platform.worldOf(ctrl);
+        ps.setString(1, q.getOwner().toString());
+        ps.setString(2, q.getOwnerName());
+        ps.setString(3, world != null ? platform.worldName(world) : "");
+        ps.setInt(4, platform.blockX(q.getPosA()));
+        ps.setInt(5, platform.blockY(q.getPosA()));
+        ps.setInt(6, platform.blockZ(q.getPosA()));
+        ps.setInt(7, platform.blockX(q.getPosB()));
+        ps.setInt(8, platform.blockY(q.getPosB()));
+        ps.setInt(9, platform.blockZ(q.getPosB()));
+        ps.setInt(10, platform.blockX(ctrl));
+        ps.setInt(11, platform.blockY(ctrl));
+        ps.setInt(12, platform.blockZ(ctrl));
+        ps.setInt(13, q.isActive() ? 1 : 0);
+        ps.setInt(14, q.getControllerYaw());
+        ps.setInt(15, q.hasSilkTouchAugment() ? 1 : 0);
+        ps.setInt(16, Math.max(0, q.getSpeedAugmentLevel()));
+        ps.setInt(17, q.isOutputRoundRobin() ? 1 : 0);
+        ps.setInt(18, q.getRedstoneMode());
+        ps.setInt(19, q.isChunkLoadingEnabled() ? 1 : 0);
+        ps.setInt(20, q.isSilentMode() ? 1 : 0);
+        ps.setInt(21, q.frameMinX());
+        ps.setInt(22, q.frameMinZ());
+        ps.setInt(23, q.frameMaxX());
+        ps.setInt(24, q.frameMaxZ());
+    }
+
     public void loadAll() {
         quarries.clear();
         debug.log("loadAll", "Loading quarries (stub)");
-        final boolean[] shouldPersistPausedState = new boolean[] { false };
+        final List<Quarry> savedActiveQuarries = new ArrayList<>();
         Database.run(conn -> {
             var rs = conn.createStatement().executeQuery("SELECT * FROM quarries");
             while (rs.next()) {
@@ -190,7 +255,7 @@ public class QuarryManager {
                 register(q);
 
                 if (active) {
-                    shouldPersistPausedState[0] = true;
+                    savedActiveQuarries.add(q);
                 }
 
                 if (DebugFlags.STARTUP_LOAD_LOGGING) {
@@ -200,8 +265,10 @@ public class QuarryManager {
         });
 
         // If any quarries were saved as active, rewrite the DB so they remain paused on future restarts.
-        if (shouldPersistPausedState[0]) {
-            saveAll();
+        if (!savedActiveQuarries.isEmpty()) {
+            for (Quarry q : savedActiveQuarries) {
+                saveQuarry(q);
+            }
         }
     }
 

@@ -2,7 +2,6 @@ package dev.cloudframe.common.markers;
 
 import dev.cloudframe.common.storage.Database;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -72,21 +71,18 @@ public final class MarkerSelectionRepository {
                 MarkerSelectionState sel = e.getValue();
                 if (id == null || sel == null) continue;
                 List<MarkerPos> corners = sel.corners();
-                if (corners.size() < 2) continue;
+                // Persist only complete, valid rectangle frames.
+                if (corners == null || corners.size() != 4) continue;
 
-                int minX = corners.get(0).x();
-                int maxX = corners.get(0).x();
-                int minZ = corners.get(0).z();
-                int maxZ = corners.get(0).z();
-                int y = corners.get(0).y();
+                var canon = MarkerFrameCanonicalizer.canonicalize(corners, true);
+                if (!canon.ok()) continue;
 
-                for (MarkerPos corner : corners) {
-                    if (corner == null) continue;
-                    minX = Math.min(minX, corner.x());
-                    maxX = Math.max(maxX, corner.x());
-                    minZ = Math.min(minZ, corner.z());
-                    maxZ = Math.max(maxZ, corner.z());
-                }
+                List<MarkerPos> canonical = canon.corners();
+                int minX = canonical.get(0).x();
+                int minZ = canonical.get(0).z();
+                int y = canonical.get(0).y();
+                int maxX = canonical.get(2).x();
+                int maxZ = canonical.get(2).z();
 
                 ps.setString(1, id.toString());
                 ps.setString(2, sel.worldId() == null ? "minecraft:overworld" : sel.worldId());

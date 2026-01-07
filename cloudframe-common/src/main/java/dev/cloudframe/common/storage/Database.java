@@ -145,6 +145,52 @@ public class Database {
                 // Column already exists (or table is new).
             }
 
+            // Cables table (Cloud Cables per-side disabled external connections)
+            stmt.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS cables (
+                    world TEXT NOT NULL,
+                    x INTEGER NOT NULL,
+                    y INTEGER NOT NULL,
+                    z INTEGER NOT NULL,
+                    disabled_sides INTEGER DEFAULT 0,
+                    PRIMARY KEY (world, x, y, z)
+                );
+            """);
+
+            // Best-effort migration for disabled cable sides.
+            try {
+                stmt.executeUpdate("ALTER TABLE cables ADD COLUMN disabled_sides INTEGER DEFAULT 0");
+            } catch (SQLException ignored) {
+                // Column already exists (or table is new).
+            }
+
+            // Pipe filters (per-side)
+            // items is a serialized 27-slot list of item identifiers.
+            stmt.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS pipe_filters (
+                    world TEXT NOT NULL,
+                    x INTEGER NOT NULL,
+                    y INTEGER NOT NULL,
+                    z INTEGER NOT NULL,
+                    side INTEGER NOT NULL,
+                    mode INTEGER DEFAULT 0,
+                    items TEXT,
+                    PRIMARY KEY (world, x, y, z, side)
+                );
+            """);
+
+            // Best-effort migration for pipe filter columns.
+            try {
+                stmt.executeUpdate("ALTER TABLE pipe_filters ADD COLUMN mode INTEGER DEFAULT 0");
+            } catch (SQLException ignored) {
+                // Column already exists (or table is new).
+            }
+            try {
+                stmt.executeUpdate("ALTER TABLE pipe_filters ADD COLUMN items TEXT");
+            } catch (SQLException ignored) {
+                // Column already exists (or table is new).
+            }
+
             // Markers table
             stmt.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS markers (

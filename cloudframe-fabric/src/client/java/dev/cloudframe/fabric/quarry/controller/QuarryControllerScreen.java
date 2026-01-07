@@ -10,6 +10,7 @@ import net.minecraft.text.Text;
 import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.Formatting;
+import net.minecraft.util.math.BlockPos;
 
 public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreenHandler> {
 
@@ -48,8 +49,37 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
 
     private double animatedPowerFillRatio = 0.0;
     private double animatedPowerUsingCfePerTick = 0.0;
+    private double lastNonZeroTargetUsingCfePerTick = 0.0;
     private boolean lastPowerActive = false;
     private int lastQuarryState = Integer.MIN_VALUE;
+
+    private static final class CachedPowerAnim {
+        final double fillRatio;
+        final double usingCfePerTick;
+        final double lastNonZeroTargetUsingCfePerTick;
+        final boolean lastPowerActive;
+        final int lastQuarryState;
+        final long updatedAtMs;
+
+        CachedPowerAnim(
+            double fillRatio,
+            double usingCfePerTick,
+            double lastNonZeroTargetUsingCfePerTick,
+            boolean lastPowerActive,
+            int lastQuarryState,
+            long updatedAtMs
+        ) {
+            this.fillRatio = fillRatio;
+            this.usingCfePerTick = usingCfePerTick;
+            this.lastNonZeroTargetUsingCfePerTick = lastNonZeroTargetUsingCfePerTick;
+            this.lastPowerActive = lastPowerActive;
+            this.lastQuarryState = lastQuarryState;
+            this.updatedAtMs = updatedAtMs;
+        }
+    }
+
+    private static final java.util.Map<Long, CachedPowerAnim> POWER_ANIM_CACHE = new java.util.HashMap<>();
+    private static final long POWER_ANIM_CACHE_TTL_MS = 30_000L;
 
     // Slot positions (row 1)
     private static final int SLOT_CHUNK_PREVIEW_X = 8 + 6 * 18;
@@ -72,6 +102,7 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
         if (!handler.hasRegisteredQuarry()) {
             animatedPowerFillRatio = 0.0;
             animatedPowerUsingCfePerTick = 0.0;
+            lastNonZeroTargetUsingCfePerTick = 0.0;
             lastPowerActive = false;
             lastQuarryState = 0;
             return;
@@ -83,12 +114,34 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
 
         boolean activeNow = targetRequired > 0;
 
+        if (targetRequired > 0) {
+            lastNonZeroTargetUsingCfePerTick = (double) targetRequired;
+        }
+
+        long cacheKey = getPowerAnimCacheKey();
+        long nowMs = System.currentTimeMillis();
+
         // First tick after opening the screen: if the quarry is already active,
         // initialize immediately to the current values (no ramp-from-zero).
         if (lastQuarryState == Integer.MIN_VALUE) {
+            CachedPowerAnim cached = cacheKey != Long.MIN_VALUE ? POWER_ANIM_CACHE.get(cacheKey) : null;
+            if (cached != null && (nowMs - cached.updatedAtMs) <= POWER_ANIM_CACHE_TTL_MS) {
+                animatedPowerFillRatio = Math.min(1.0, Math.max(0.0, cached.fillRatio));
+                animatedPowerUsingCfePerTick = Math.max(0.0, cached.usingCfePerTick);
+                lastNonZeroTargetUsingCfePerTick = Math.max(0.0, cached.lastNonZeroTargetUsingCfePerTick);
+                lastPowerActive = cached.lastPowerActive;
+                lastQuarryState = cached.lastQuarryState;
+                return;
+            }
+
+            if (cached != null) {
+                POWER_ANIM_CACHE.remove(cacheKey);
+            }
+
             if (activeNow) {
                 double initFill = Math.min(1.0, Math.max(0.0, (double) targetReceived / (double) targetRequired));
                 animatedPowerFillRatio = initFill;
+                // Start at the real required value so steady-state doesn't animate from zero.
                 animatedPowerUsingCfePerTick = (double) targetRequired;
                 lastPowerActive = true;
             } else {
@@ -97,6 +150,7 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
                 lastPowerActive = false;
             }
             lastQuarryState = quarryState;
+            cachePowerAnim(nowMs);
             return;
         }
 
@@ -124,13 +178,20 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
             animatedPowerFillRatio = Math.max(targetFill, animatedPowerFillRatio - POWER_FILL_RISE_STEP);
         }
 
-        if (targetRequired > animatedPowerUsingCfePerTick) {
-            double stepUp = Math.max(1.0, (double) targetRequired / POWER_RAMP_TICKS);
-            animatedPowerUsingCfePerTick = Math.min((double) targetRequired, animatedPowerUsingCfePerTick + stepUp);
-        } else if (targetRequired < animatedPowerUsingCfePerTick) {
-            double stepDown = Math.max(1.0, animatedPowerUsingCfePerTick / POWER_RAMP_TICKS);
-            animatedPowerUsingCfePerTick = Math.max((double) targetRequired, animatedPowerUsingCfePerTick - stepDown);
+        // Keep "Power using" animation aligned with the bar animation duration.
+        // (Previously it ramped in whole numbers and reached the target far faster than the bar.)
+        double targetUsing = activeNow ? (double) targetRequired : 0.0;
+
+        if (targetUsing > animatedPowerUsingCfePerTick) {
+            double stepUp = Math.max(0.01, targetUsing / POWER_RAMP_TICKS);
+            animatedPowerUsingCfePerTick = Math.min(targetUsing, animatedPowerUsingCfePerTick + stepUp);
+        } else if (targetUsing < animatedPowerUsingCfePerTick) {
+            double base = lastNonZeroTargetUsingCfePerTick > 0.0 ? lastNonZeroTargetUsingCfePerTick : animatedPowerUsingCfePerTick;
+            double stepDown = Math.max(0.01, base / POWER_RAMP_TICKS);
+            animatedPowerUsingCfePerTick = Math.max(targetUsing, animatedPowerUsingCfePerTick - stepDown);
         }
+
+        cachePowerAnim(nowMs);
     }
 
     /**
@@ -139,6 +200,36 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
      */
     public void onClientTick() {
         updatePowerAnimationOneTick();
+    }
+
+    @Override
+    public void removed() {
+        cachePowerAnim(System.currentTimeMillis());
+        super.removed();
+    }
+
+    private long getPowerAnimCacheKey() {
+        try {
+            BlockPos p = handler != null ? handler.getControllerPos() : null;
+            if (p == null) return Long.MIN_VALUE;
+            return p.asLong();
+        } catch (Throwable t) {
+            return Long.MIN_VALUE;
+        }
+    }
+
+    private void cachePowerAnim(long nowMs) {
+        long key = getPowerAnimCacheKey();
+        if (key == Long.MIN_VALUE) return;
+
+        POWER_ANIM_CACHE.put(key, new CachedPowerAnim(
+            Math.min(1.0, Math.max(0.0, animatedPowerFillRatio)),
+            Math.max(0.0, animatedPowerUsingCfePerTick),
+            Math.max(0.0, lastNonZeroTargetUsingCfePerTick),
+            lastPowerActive,
+            lastQuarryState,
+            nowMs
+        ));
     }
 
     @Override

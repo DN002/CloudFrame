@@ -18,16 +18,6 @@ public class ItemPacketManager {
     private final List<ItemPacket> packets = new ArrayList<>();
     private final IItemDeliveryProvider deliveryProvider;
 
-    // Shared 6-direction vectors
-    private static final int[][] DIRS = {
-        {1, 0, 0},
-        {-1, 0, 0},
-        {0, 1, 0},
-        {0, -1, 0},
-        {0, 0, 1},
-        {0, 0, -1}
-    };
-
     /**
      * Provider interface for platform-specific delivery operations.
      * Implemented by BukkitItemDeliveryProvider, FabricItemDeliveryProvider, etc.
@@ -93,32 +83,14 @@ public class ItemPacketManager {
                 debug.log("deliver", "Delivering into known inventory");
             }
 
-            if (!deliveryProvider.isChunkLoaded(destInvLoc)) {
-                if (shouldLog) {
-                    debug.log("deliver", "Chunk not loaded — dropping item safely");
-                }
-                deliveryProvider.dropItems(destInvLoc, new Object[]{p.getItem()});
-                return;
-            }
-
-            Object holder = deliveryProvider.getInventoryHolder(destInvLoc);
-            if (holder != null) {
-                int deliveredAmount = p.getItemAmount();
-                int actuallyAdded = deliveryProvider.addItem(holder, p.getItem());
-                int leftovers = deliveredAmount - actuallyAdded;
-
-                if (leftovers > 0) {
-                    Object leftoverItem = p.createLeftoverItem(leftovers);
-                    deliveryProvider.dropItems(destInvLoc, new Object[]{leftoverItem});
-                }
-
-                if (p.getOnDeliveryCallback() != null) {
-                    p.getOnDeliveryCallback().accept(destInvLoc, actuallyAdded);
-                }
-                return;
-            }
-
-            deliveryProvider.dropItems(destInvLoc, new Object[]{p.getItem()});
+            AdjacentInventoryDelivery.deliverToInventoryLocation(
+                    destInvLoc,
+                    p.getItem(),
+                    p.getItemAmount(),
+                    deliveryProvider,
+                    (leftovers) -> p.createLeftoverItem(leftovers),
+                    p.getOnDeliveryCallback()
+            );
             return;
         }
 
@@ -129,31 +101,17 @@ public class ItemPacketManager {
             debug.log("deliver", "Delivering to pipe, scanning adjacent blocks");
         }
 
-        if (!deliveryProvider.isChunkLoaded(loc)) {
-            if (shouldLog) {
-                debug.log("deliver", "Chunk not loaded — dropping item safely");
-            }
-            deliveryProvider.dropItems(loc, new Object[]{p.getItem()});
-            return;
-        }
-
-        for (int dirIdx = 0; dirIdx < DIRS.length; dirIdx++) {
-            Object adj = deliveryProvider.getAdjacentBlockLocation(loc, dirIdx);
-            if (adj == null) continue;
-
-            Object inv = deliveryProvider.getInventoryHolder(adj);
-            if (inv != null) {
-                if (shouldLog) {
-                    debug.log("deliver", "Found inventory at adjacent block");
-                }
-                deliveryProvider.addItem(inv, p.getItem());
-                return;
-            }
-        }
+        int inserted = AdjacentInventoryDelivery.deliverToAnyAdjacentInventory(
+                loc,
+                p.getItem(),
+                p.getItemAmount(),
+                deliveryProvider,
+                (leftovers) -> p.createLeftoverItem(leftovers),
+                p.getOnDeliveryCallback()
+        );
 
         if (shouldLog) {
-            debug.log("deliver", "No inventory found — dropping item");
+            debug.log("deliver", inserted > 0 ? "Delivered into adjacent inventory" : "No inventory accepted item — dropped");
         }
-        deliveryProvider.dropItems(loc, new Object[]{p.getItem()});
     }
 }

@@ -3,8 +3,8 @@ package dev.cloudframe.common.pipes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.function.BiConsumer;
 
+import dev.cloudframe.common.platform.items.ItemStackAdapter;
 import dev.cloudframe.common.util.Debug;
 import dev.cloudframe.common.util.DebugManager;
 
@@ -20,7 +20,7 @@ public class ItemPacket {
     private final IItemStackAdapter itemAdapter;
     private final List<Object> waypoints; // Location objects (platform-specific)
     private final Object destinationInventory; // nullable Location (platform-specific)
-    private final BiConsumer<Object, Integer> onDeliveryCallback; // nullable callback
+    private final ItemPacketDeliveryCallback onDeliveryCallback; // nullable callback
 
     private int currentIndex = 0;
     private double progress = 0.0;
@@ -45,16 +45,58 @@ public class ItemPacket {
         Object withAmount(Object item, int amount);
     }
 
+    private static IItemStackAdapter packetAdapterFromStackAdapter(ItemStackAdapter<?> stackAdapter) {
+        Objects.requireNonNull(stackAdapter, "stackAdapter");
+
+        return new IItemStackAdapter() {
+            @Override
+            public int getAmount(Object item) {
+                @SuppressWarnings("unchecked")
+                ItemStackAdapter<Object> a = (ItemStackAdapter<Object>) stackAdapter;
+                return a.getCount(item);
+            }
+
+            @Override
+            public Object withAmount(Object item, int amount) {
+                @SuppressWarnings("unchecked")
+                ItemStackAdapter<Object> a = (ItemStackAdapter<Object>) stackAdapter;
+
+                Object copy = a.copy(item);
+                a.setCount(copy, Math.max(0, amount));
+                return copy;
+            }
+        };
+    }
+
     public ItemPacket(Object item, List<PipeNode> path, IPacketVisuals visuals, IItemStackAdapter itemAdapter) {
         this(item, toWaypoints(path), null, null, visuals, itemAdapter);
+    }
+
+    public ItemPacket(Object item, List<PipeNode> path, IPacketVisuals visuals, ItemStackAdapter<?> stackAdapter) {
+        this(item, toWaypoints(path), null, null, visuals, packetAdapterFromStackAdapter(stackAdapter));
     }
 
     public ItemPacket(Object item, List<Object> waypoints, Object destinationInventory, IPacketVisuals visuals, IItemStackAdapter itemAdapter) {
         this(item, waypoints, destinationInventory, null, visuals, itemAdapter);
     }
 
+    public ItemPacket(Object item, List<Object> waypoints, Object destinationInventory, IPacketVisuals visuals, ItemStackAdapter<?> stackAdapter) {
+        this(item, waypoints, destinationInventory, null, visuals, packetAdapterFromStackAdapter(stackAdapter));
+    }
+
+    public ItemPacket(
+            Object item,
+            List<Object> waypoints,
+            Object destinationInventory,
+            ItemPacketDeliveryCallback onDeliveryCallback,
+            IPacketVisuals visuals,
+            ItemStackAdapter<?> stackAdapter
+    ) {
+        this(item, waypoints, destinationInventory, onDeliveryCallback, visuals, packetAdapterFromStackAdapter(stackAdapter));
+    }
+
     public ItemPacket(Object item, List<Object> waypoints, Object destinationInventory,
-                      BiConsumer<Object, Integer> onDeliveryCallback, IPacketVisuals visuals,
+                      ItemPacketDeliveryCallback onDeliveryCallback, IPacketVisuals visuals,
                       IItemStackAdapter itemAdapter) {
         this.item = Objects.requireNonNull(item, "item");
         this.itemAdapter = Objects.requireNonNull(itemAdapter, "itemAdapter");
@@ -190,7 +232,7 @@ public class ItemPacket {
         return progress;
     }
 
-    public BiConsumer<Object, Integer> getOnDeliveryCallback() {
+    public ItemPacketDeliveryCallback getOnDeliveryCallback() {
         return onDeliveryCallback;
     }
 

@@ -107,7 +107,8 @@ public final class PowerProbeClient {
         if (state == null) return false;
         if (CloudFrameContent.getCloudCableBlock() != null && state.isOf(CloudFrameContent.getCloudCableBlock())) return true;
         if (CloudFrameContent.getStratusPanelBlock() != null && state.isOf(CloudFrameContent.getStratusPanelBlock())) return true;
-        return CloudFrameContent.getCloudTurbineBlock() != null && state.isOf(CloudFrameContent.getCloudTurbineBlock());
+        if (CloudFrameContent.getCloudTurbineBlock() != null && state.isOf(CloudFrameContent.getCloudTurbineBlock())) return true;
+        return CloudFrameContent.getQuarryControllerBlock() != null && state.isOf(CloudFrameContent.getQuarryControllerBlock());
     }
 
     private static void clearActionbarIfNeeded(MinecraftClient client) {
@@ -127,6 +128,9 @@ public final class PowerProbeClient {
         return switch (type) {
             case PowerProbePackets.TYPE_CABLE -> Text.literal(
                 "Cloud Network: +" + formatNumber(produced) + " CFE/t | Stored: " + formatNumber(stored) + " CFE" + formatExternal(externalApiPresent, externalEndpointCount, externalStored, externalCapacity)
+            );
+            case PowerProbePackets.TYPE_QUARRY_CONTROLLER -> Text.literal(
+                "Quarry Controller (" + formatControllerState(externalEndpointCount) + "): Using " + formatNumber(stored) + " CFE/t | Receiving " + formatNumber(produced) + " CFE/t"
             );
             case PowerProbePackets.TYPE_STRATUS_PANEL -> Text.literal(
                 "Stratus Panel: +" + formatNumber(produced) + " CFE/t"
@@ -154,5 +158,15 @@ public final class PowerProbeClient {
 
     private static String formatNumber(long value) {
         return String.format("%,d", Math.max(0L, value));
+    }
+
+    private static String formatControllerState(int state) {
+        return switch (state) {
+            case 4 -> "Scanning Metadata";
+            case 3 -> "Scanning";
+            case 2 -> "Mining";
+            case 1 -> "Paused";
+            default -> "Unregistered";
+        };
     }
 }

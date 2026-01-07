@@ -5,11 +5,13 @@ import org.slf4j.LoggerFactory;
 import dev.cloudframe.common.util.DebugFile;
 import dev.cloudframe.common.util.DebugManager;
 import dev.cloudframe.common.util.Debug;
+import dev.cloudframe.common.markers.InMemoryMarkerSelectionService;
 import dev.cloudframe.common.storage.Database;
 import dev.cloudframe.common.pipes.ItemPacketManager;
 import dev.cloudframe.common.pipes.PipeNetworkManager;
 import dev.cloudframe.common.quarry.QuarryManager;
 import dev.cloudframe.common.quarry.QuarryPlatform;
+import dev.cloudframe.common.power.cables.InMemoryCableConnectionService;
 import dev.cloudframe.fabric.commands.CloudFrameCommands;
 import dev.cloudframe.fabric.quarry.FabricQuarryPlatform;
 import dev.cloudframe.fabric.content.CloudFrameContent;
@@ -47,6 +49,8 @@ public class CloudFrameFabric implements ModInitializer {
     private QuarryManager quarryManager;
     private QuarryPlatform quarryPlatform;
     private FabricMarkerManager markerManager;
+    private dev.cloudframe.fabric.power.FabricCableConnectionManager cableConnectionManager;
+    private dev.cloudframe.fabric.pipes.FabricPipeFilterManager pipeFilterManager;
     private MinecraftServer server;
     private boolean commandsRegistered = false;
     private int tickCounter = 0;
@@ -113,7 +117,7 @@ public class CloudFrameFabric implements ModInitializer {
             return;
         }
 
-        markerManager = new FabricMarkerManager();
+        markerManager = new FabricMarkerManager(new InMemoryMarkerSelectionService());
 
         // Register server lifecycle events
         ServerLifecycleEvents.SERVER_STARTED.register(this::onServerStarted);
@@ -176,6 +180,14 @@ public class CloudFrameFabric implements ModInitializer {
         pipeManager = new PipeNetworkManager(new FabricPipeLocationAdapter(server));
         // Fabric uses real blocks for pipes, so we don't need entity-only pipe visuals/hitboxes.
         debug.log("onServerStarted", "PipeNetworkManager initialized");
+
+        cableConnectionManager = new dev.cloudframe.fabric.power.FabricCableConnectionManager(server, new InMemoryCableConnectionService());
+        cableConnectionManager.loadAll();
+        debug.log("onServerStarted", "CableConnectionManager initialized");
+
+        pipeFilterManager = new dev.cloudframe.fabric.pipes.FabricPipeFilterManager(server);
+        pipeFilterManager.loadAll();
+        debug.log("onServerStarted", "PipeFilterManager initialized");
 
         packetManager = new ItemPacketManager(new FabricItemDeliveryProvider(server));
         debug.log("onServerStarted", "ItemPacketManager initialized");
@@ -402,6 +414,14 @@ public class CloudFrameFabric implements ModInitializer {
 
     public FabricMarkerManager getMarkerManager() {
         return markerManager;
+    }
+
+    public dev.cloudframe.fabric.power.FabricCableConnectionManager getCableConnectionManager() {
+        return cableConnectionManager;
+    }
+
+    public dev.cloudframe.fabric.pipes.FabricPipeFilterManager getPipeFilterManager() {
+        return pipeFilterManager;
     }
 
     public static CloudFrameFabric instance() {

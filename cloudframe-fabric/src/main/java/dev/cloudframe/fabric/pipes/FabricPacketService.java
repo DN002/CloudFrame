@@ -29,8 +29,9 @@ public class FabricPacketService {
             itemStack,
             waypointObjects,
             destinationInventory,
+            callback,
             new FabricPacketVisuals(server),
-            new FabricItemStackAdapter()
+            FabricItemStackAdapter.INSTANCE
         );
 
         packetManager.add(packet);

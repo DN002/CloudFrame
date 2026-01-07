@@ -45,7 +45,7 @@ public final class CloudFrameCommands {
                 source.sendMessage(Text.literal("CloudFrame commands:"));
                 source.sendMessage(Text.literal("- /cloudframe help"));
                 source.sendMessage(Text.literal("- /cloudframe give <type> [player] (OP only)"));
-                source.sendMessage(Text.literal("Give types: marker, wrench, pipe, cable, controller, silk, speed1, speed2, speed3"));
+                source.sendMessage(Text.literal("Give types: marker, wrench, pipe, cable, controller, pipe_filter, silk, speed1, speed2, speed3"));
                 return 1;
             })
             .then(
@@ -56,7 +56,7 @@ public final class CloudFrameCommands {
                         source.sendMessage(Text.literal("CloudFrame commands:"));
                         source.sendMessage(Text.literal("- /cloudframe help"));
                         source.sendMessage(Text.literal("- /cloudframe give <type> [player] (OP only)"));
-                        source.sendMessage(Text.literal("Give types: marker, wrench, pipe, cable, controller, silk, speed1, speed2, speed3"));
+                        source.sendMessage(Text.literal("Give types: marker, wrench, pipe, cable, controller, pipe_filter, silk, speed1, speed2, speed3"));
                         return 1;
                     })
             )

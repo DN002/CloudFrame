@@ -11,8 +11,10 @@ import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 import dev.cloudframe.common.storage.Database;
+import dev.cloudframe.common.platform.world.WorldKeyAdapter;
 import dev.cloudframe.common.util.Debug;
 import dev.cloudframe.common.util.DebugFlags;
 import dev.cloudframe.common.util.DebugManager;
@@ -53,12 +55,32 @@ public class PipeNetworkManager {
         ChunkKey chunkKey(Object loc);
         boolean isChunkLoaded(Object loc);
         boolean isInventoryAt(Object loc);
-        String worldName(Object loc);
+        Object worldOf(Object loc);
+        WorldKeyAdapter<Object> worldKeyAdapter();
+        default String worldName(Object loc) {
+            WorldKeyAdapter<Object> adapter = worldKeyAdapter();
+            if (adapter == null) return "";
+            try {
+                Object world = worldOf(loc);
+                String key = adapter.key(world);
+                return key != null ? key : "";
+            } catch (Throwable ignored) {
+                return "";
+            }
+        }
         UUID worldId(Object loc);
         int blockX(Object loc);
         int blockY(Object loc);
         int blockZ(Object loc);
-        Object worldByName(String name);
+        default Object worldByName(String name) {
+            WorldKeyAdapter<Object> adapter = worldKeyAdapter();
+            if (adapter == null) return null;
+            try {
+                return adapter.worldByKey(name);
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
         Object createLocation(Object world, int x, int y, int z);
     }
 
@@ -156,11 +178,16 @@ public class PipeNetworkManager {
 
         node.clearNeighbors();
 
-        for (int[] v : DIRS) {
+        for (int dirIdx = 0; dirIdx < DIRS.length; dirIdx++) {
+            if (node.isInventorySideDisabled(dirIdx)) continue;
+
+            int[] v = DIRS[dirIdx];
             Object adj = locations.offset(loc, v[0], v[1], v[2]);
             PipeNode neighbor = pipes.get(adj);
 
             if (neighbor != null) {
+                int opposite = oppositeDirIndex(dirIdx);
+                if (opposite >= 0 && neighbor.isInventorySideDisabled(opposite)) continue;
                 node.addNeighbor(neighbor);
                 neighbor.addNeighbor(node);
                 if (DebugFlags.STARTUP_LOAD_LOGGING) {
@@ -168,6 +195,18 @@ public class PipeNetworkManager {
                 }
             }
         }
+    }
+
+    private static int oppositeDirIndex(int dirIdx) {
+        return switch (dirIdx) {
+            case 0 -> 1;
+            case 1 -> 0;
+            case 2 -> 3;
+            case 3 -> 2;
+            case 4 -> 5;
+            case 5 -> 4;
+            default -> -1;
+        };
     }
 
     public void rebuildAll() {
@@ -348,6 +387,125 @@ public class PipeNetworkManager {
         });
 
         debug.log("loadAll", "Finished loading pipes");
+    }
+
+    /**
+     * Returns true when the given controller location is connected to at least one inventory,
+     * either directly adjacent or via a pipe network.
+     *
+     * If the in-memory cache is missing pipe nodes (e.g., DB reset or older worlds), this can
+     * lazily index currently-loaded pipe blocks in-world using {@code isPipeAt}.
+     */
+    public boolean hasValidOutputFrom(Object controllerLoc, Predicate<Object> isPipeAt, int maxScanPipes) {
+        if (controllerLoc == null) return false;
+
+        Object ctrl = locations.normalize(controllerLoc);
+
+        // Direct adjacent inventory.
+        for (int dirIdx = 0; dirIdx < DIRS.length; dirIdx++) {
+            int[] dir = DIRS[dirIdx];
+            Object adj = locations.offset(ctrl, dir[0], dir[1], dir[2]);
+            if (locations.isInventoryAt(adj)) return true;
+        }
+
+        if (isPipeAt == null) return false;
+
+        // If we already have an adjacent cached pipe node, use the cached graph first.
+        PipeNode start = null;
+        for (int dirIdx = 0; dirIdx < DIRS.length; dirIdx++) {
+            int[] dir = DIRS[dirIdx];
+            Object adj = locations.offset(ctrl, dir[0], dir[1], dir[2]);
+            if (!isPipeAt.test(adj)) continue;
+
+            PipeNode node = getPipe(adj);
+            int towardControllerIdx = oppositeDirIndex(dirIdx);
+            if (node != null && towardControllerIdx >= 0 && node.isInventorySideDisabled(towardControllerIdx)) {
+                continue;
+            }
+            if (node != null) {
+                start = node;
+                break;
+            }
+        }
+
+        if (start != null) {
+            List<Object> inventories = findInventoriesNear(start);
+            if (inventories != null && !inventories.isEmpty()) return true;
+        }
+
+        // Lazy indexing: BFS through currently-loaded pipe blocks and ensure they exist in the cache.
+        int limit = maxScanPipes <= 0 ? 8192 : maxScanPipes;
+        java.util.ArrayDeque<Object> queue = new java.util.ArrayDeque<>();
+        java.util.HashSet<Object> visited = new java.util.HashSet<>();
+
+        for (int dirIdx = 0; dirIdx < DIRS.length; dirIdx++) {
+            int[] dir = DIRS[dirIdx];
+            Object adj = locations.offset(ctrl, dir[0], dir[1], dir[2]);
+            if (!isPipeAt.test(adj)) continue;
+
+            PipeNode node = getPipe(adj);
+            int towardControllerIdx = oppositeDirIndex(dirIdx);
+            if (node != null && towardControllerIdx >= 0 && node.isInventorySideDisabled(towardControllerIdx)) {
+                continue;
+            }
+            queue.add(locations.normalize(adj));
+        }
+
+        boolean foundInventory = false;
+
+        while (!queue.isEmpty() && visited.size() < limit) {
+            Object pos = queue.pollFirst();
+            if (pos == null) continue;
+            pos = locations.normalize(pos);
+            if (!visited.add(pos)) continue;
+
+            if (getPipe(pos) == null) {
+                addPipe(pos);
+            }
+
+            PipeNode node = getPipe(pos);
+
+            for (int dirIdx = 0; dirIdx < DIRS.length; dirIdx++) {
+                int[] dir = DIRS[dirIdx];
+                Object adj = locations.offset(pos, dir[0], dir[1], dir[2]);
+
+                if (isPipeAt.test(adj)) {
+                    Object normAdj = locations.normalize(adj);
+                    if (!visited.contains(normAdj)) {
+                        queue.add(normAdj);
+                    }
+                }
+
+                boolean sideEnabled = (node == null) || !node.isInventorySideDisabled(dirIdx);
+                if (sideEnabled && locations.isInventoryAt(adj)) {
+                    foundInventory = true;
+                }
+            }
+        }
+
+        if (foundInventory) return true;
+
+        // Re-check with cached graph now that we've added missing pipes.
+        PipeNode start2 = null;
+        for (int dirIdx = 0; dirIdx < DIRS.length; dirIdx++) {
+            int[] dir = DIRS[dirIdx];
+            Object adj = locations.offset(ctrl, dir[0], dir[1], dir[2]);
+            if (!isPipeAt.test(adj)) continue;
+
+            PipeNode node = getPipe(adj);
+            int towardControllerIdx = oppositeDirIndex(dirIdx);
+            if (node != null && towardControllerIdx >= 0 && node.isInventorySideDisabled(towardControllerIdx)) {
+                continue;
+            }
+            if (node != null) {
+                start2 = node;
+                break;
+            }
+        }
+
+        if (start2 == null) return false;
+        List<Object> inventories = findInventoriesNear(start2);
+        return inventories != null && !inventories.isEmpty();
     }
 
     private void indexAdd(Object loc) {

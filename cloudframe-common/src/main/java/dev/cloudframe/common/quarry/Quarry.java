@@ -114,6 +114,7 @@ public class Quarry {
 
     private final List<Object> outputBuffer = new ArrayList<>();
     private final Map<String, Integer> inFlightByDestination = new HashMap<>();
+    private final Map<String, Integer> inFlightByDestinationAndItem = new HashMap<>();
     private int outputInventoryCursor = 0;
 
     public Quarry(UUID owner, String ownerName, Object posA, Object posB, Region region, Object controller, int controllerYaw, QuarryPlatform platform) {
@@ -669,31 +670,34 @@ public class Quarry {
 
         Object peek = outputBuffer.get(0);
 
-        for (int[] dir : DIRS) {
-            Object adj = platform.offset(controller, dir[0], dir[1], dir[2]);
-            if (!platform.isInventory(adj)) continue;
+        Object adj = AdjacentInventorySelection.findFirstAdjacentInventoryWithSpace(
+                platform,
+                controller,
+                peek,
+            inFlightByDestination,
+            inFlightByDestinationAndItem
+        );
 
-            Object holder = platform.getInventoryHolder(adj);
-            if (holder == null) continue;
-            if (!platform.hasSpaceFor(holder, peek, inFlightByDestination)) continue;
+        if (adj == null) return false;
 
-            int added = platform.addToInventory(holder, peek);
-            int amount = platform.stackAmount(peek);
+        Object holder = platform.getInventoryHolder(adj);
+        if (holder == null) return false;
 
-            if (added >= amount) {
-                outputBuffer.remove(0);
-            } else if (added > 0) {
-                int remaining = amount - added;
-                outputBuffer.set(0, platform.copyWithAmount(peek, remaining));
-            }
+        int added = platform.addToInventory(holder, peek);
+        int amount = platform.stackAmount(peek);
 
-            if (shouldLog) {
-                debug.log("trySendToAdjacentInventory", "Inserted into adjacent inventory at " + adj);
-            }
-            return true;
+        if (added >= amount) {
+            outputBuffer.remove(0);
+        } else if (added > 0) {
+            int remaining = amount - added;
+            outputBuffer.set(0, platform.copyWithAmount(peek, remaining));
         }
 
-        return false;
+        if (shouldLog) {
+            debug.log("trySendToAdjacentInventory", "Inserted into adjacent inventory at " + adj);
+        }
+        return true;
+
     }
 
     private boolean trySendThroughPipes(boolean shouldLog) {
@@ -701,15 +705,8 @@ public class Quarry {
         PipeNetworkManager pipes = platform.pipes();
         if (pipes == null) return false;
 
-        dev.cloudframe.common.pipes.PipeNode startPipe = null;
-        for (int[] dir : DIRS) {
-            Object adj = platform.offset(controller, dir[0], dir[1], dir[2]);
-            var node = pipes.getPipe(adj);
-            if (node != null) {
-                startPipe = node;
-                break;
-            }
-        }
+        PipeOutputRouting.AdjacentPipe startAdj = PipeOutputRouting.findAdjacentPipe(platform, pipes, controller);
+        dev.cloudframe.common.pipes.PipeNode startPipe = startAdj != null ? startAdj.node() : null;
 
         if (startPipe == null) {
             if (shouldLog) debug.log("trySendThroughPipes", "No adjacent pipe for controller " + controller);
@@ -719,74 +716,32 @@ public class Quarry {
         List<Object> inventories = pipes.findInventoriesNear(startPipe);
         if (inventories == null || inventories.isEmpty()) return false;
 
-        inventories = new ArrayList<>(inventories);
-        inventories.sort(
-            Comparator
-                .comparingDouble(loc -> platform.distanceSquared(controller, loc))
-                .thenComparingInt(loc -> platform.blockX(loc))
-                .thenComparingInt(loc -> platform.blockY(loc))
-                .thenComparingInt(loc -> platform.blockZ(loc))
-        );
-
-        int startIndex = outputRoundRobin && !inventories.isEmpty()
-                ? Math.floorMod(outputInventoryCursor, inventories.size())
-                : 0;
-
         Object peek = outputBuffer.get(0);
 
-        for (int attempt = 0; attempt < inventories.size(); attempt++) {
-            int idx = (startIndex + attempt) % inventories.size();
-            Object invLoc = inventories.get(idx);
+        PipeOutputRouting.Selection sel = PipeOutputRouting.selectDestination(
+                platform,
+                pipes,
+                controller,
+                startPipe,
+                inventories,
+                peek,
+                inFlightByDestination,
+            inFlightByDestinationAndItem,
+                outputRoundRobin,
+                outputInventoryCursor
+        );
 
-            Object holder = platform.getInventoryHolder(invLoc);
-            if (holder == null) continue;
-            if (!platform.hasSpaceFor(holder, peek, inFlightByDestination)) continue;
+        if (sel == null) return false;
 
-            dev.cloudframe.common.pipes.PipeNode destPipe = null;
-            for (int[] dir : DIRS) {
-                Object adj = platform.offset(invLoc, dir[0], dir[1], dir[2]);
-                var node = pipes.getPipe(adj);
-                if (node != null) {
-                    destPipe = node;
-                    break;
-                }
-            }
+        List<Object> waypoints = PipeOutputRouting.buildWaypoints(controller, sel.path(), sel.inventoryLocation());
 
-            if (destPipe == null) continue;
+        Object item = outputBuffer.remove(0);
+        InFlightAccounting.reserve(inFlightByDestination, inFlightByDestinationAndItem, platform, sel.inventoryLocation(), item);
 
-            List<dev.cloudframe.common.pipes.PipeNode> path = pipes.findPath(startPipe, destPipe);
-            if (path == null || path.isEmpty()) continue;
+        platform.packetFactory().send(item, waypoints, sel.inventoryLocation(), this::onItemDelivered);
 
-            List<Object> waypoints = new ArrayList<>();
-            // Include the controller and destination inventory so the packet is visible
-            // in the segments between controller↔pipe and pipe↔inventory.
-            waypoints.add(controller);
-            for (dev.cloudframe.common.pipes.PipeNode node : path) {
-                waypoints.add(node.getLocation());
-            }
-            waypoints.add(invLoc);
-            if (waypoints.size() < 2) {
-                waypoints.add(waypoints.get(0));
-            }
-
-            Object item = outputBuffer.remove(0);
-            int amount = platform.stackAmount(item);
-            if (amount > 0) {
-                String destKey = platform.locationKey(invLoc);
-                inFlightByDestination.merge(destKey, amount, Integer::sum);
-            }
-
-            platform.packetFactory().send(item, waypoints, invLoc, this::onItemDelivered);
-
-            if (outputRoundRobin) {
-                outputInventoryCursor = idx + 1;
-            } else {
-                outputInventoryCursor = 0;
-            }
-            return true;
-        }
-
-        return false;
+        outputInventoryCursor = sel.nextCursor();
+        return true;
     }
 
     private boolean findNextBlockToMine(boolean shouldLog) {
@@ -922,14 +877,8 @@ public class Quarry {
         return true;
     }
 
-    private void onItemDelivered(Object destination, int deliveredAmount) {
-        if (destination == null) return;
-        String destKey = platform.locationKey(destination);
-        inFlightByDestination.compute(destKey, (k, current) -> {
-            if (current == null) return null;
-            int remaining = current - deliveredAmount;
-            return remaining > 0 ? remaining : null;
-        });
+    private void onItemDelivered(Object destination, Object itemStack, int deliveredAmount) {
+        InFlightAccounting.release(inFlightByDestination, inFlightByDestinationAndItem, platform, destination, itemStack, deliveredAmount);
     }
 
     public Map<String, Integer> getInFlightMap() { return inFlightByDestination; }

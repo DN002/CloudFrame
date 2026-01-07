@@ -1,11 +1,15 @@
 package dev.cloudframe.common.quarry;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import dev.cloudframe.common.pipes.PipeNetworkManager;
 import dev.cloudframe.common.pipes.ItemPacketManager;
+import dev.cloudframe.common.pipes.ItemPacketDeliveryCallback;
+import dev.cloudframe.common.platform.items.ItemStackKeyAdapter;
+import dev.cloudframe.common.platform.world.LocationKeyAdapter;
+import dev.cloudframe.common.platform.world.WorldKeyAdapter;
+import dev.cloudframe.common.util.DirIndex;
 
 /**
  * Platform abstraction for quarry operations.
@@ -25,18 +29,19 @@ public interface QuarryPlatform {
     boolean isInventory(Object loc);
     Object getInventoryHolder(Object loc);
     int addToInventory(Object inventoryHolder, Object itemStack);
-    boolean hasSpaceFor(Object inventoryHolder, Object itemStack, Map<String, Integer> inFlight);
-    String locationKey(Object loc);
+    int totalRoomFor(Object inventoryHolder, Object itemStack);
+    int emptySlotCount(Object inventoryHolder);
+    LocationKeyAdapter<Object> locationKeyAdapter();
+    ItemStackKeyAdapter<Object> itemKeyAdapter();
     double distanceSquared(Object a, Object b);
     Object createLocation(Object world, int x, int y, int z);
     Object worldOf(Object loc);
-    Object worldByName(String name);
     /**
      * Serialize a world reference to a stable string for persistence.
      * Bukkit: typically world name.
      * Fabric: typically dimension id (e.g. "minecraft:the_nether").
      */
-    String worldName(Object world);
+    WorldKeyAdapter<Object> worldKeyAdapter();
     int blockX(Object loc);
     int blockY(Object loc);
     int blockZ(Object loc);
@@ -47,12 +52,92 @@ public interface QuarryPlatform {
     ItemPacketManager packets();
     ItemPacketFactory packetFactory();
 
+    /**
+     * Serialize a world reference to a stable string for persistence.
+     * Bukkit: typically world name.
+     * Fabric: typically dimension id (e.g. "minecraft:the_nether").
+     */
+    default String worldName(Object world) {
+        WorldKeyAdapter<Object> adapter = worldKeyAdapter();
+        if (adapter == null) return "";
+        try {
+            String key = adapter.key(world);
+            return key != null ? key : "";
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    default Object worldByName(String name) {
+        WorldKeyAdapter<Object> adapter = worldKeyAdapter();
+        if (adapter == null) return null;
+        try {
+            return adapter.worldByKey(name);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /**
+     * Returns a stable, comparable key for {@code loc}.
+     *
+     * <p>Platforms should implement {@link #locationKeyAdapter()} and inherit this default.</p>
+     */
+    default String locationKey(Object loc) {
+        LocationKeyAdapter<Object> adapter = locationKeyAdapter();
+        if (adapter == null) return "null";
+        try {
+            String key = adapter.key(loc);
+            return key != null ? key : "null";
+        } catch (Throwable ignored) {
+            return "unknown";
+        }
+    }
+
+    /**
+     * Returns a stable, count-independent key for {@code itemStack}.
+     *
+     * <p>Platforms should implement {@link #itemKeyAdapter()} and inherit this default.</p>
+     */
+    default String itemKey(Object itemStack) {
+        ItemStackKeyAdapter<Object> adapter = itemKeyAdapter();
+        if (adapter == null) return "null";
+        try {
+            String key = adapter.key(itemStack);
+            return key != null ? key : "null";
+        } catch (Throwable ignored) {
+            return "unknown";
+        }
+    }
+
+    /**
+     * Convenience helper based on {@link #totalRoomFor(Object, Object)}.
+     */
+    default boolean hasSpaceFor(Object inventoryHolder, Object itemStack) {
+        if (inventoryHolder == null || itemStack == null) return false;
+        return totalRoomFor(inventoryHolder, itemStack) >= stackAmount(itemStack);
+    }
+
+    /**
+     * Returns the 6-direction index from {@code fromLoc} to {@code toLoc} when {@code toLoc}
+     * is directly adjacent by exactly one block along a single axis.
+     *
+     * <p>If the locations are not adjacent (or either is null), returns -1.</p>
+     */
+    default int dirIndexBetween(Object fromLoc, Object toLoc) {
+        if (fromLoc == null || toLoc == null) return -1;
+
+        int dx = blockX(toLoc) - blockX(fromLoc);
+        int dy = blockY(toLoc) - blockY(fromLoc);
+        int dz = blockZ(toLoc) - blockZ(fromLoc);
+        return DirIndex.fromDelta(dx, dy, dz);
+    }
+
     interface ItemPacketFactory {
         void send(Object itemStack, List<Object> waypoints, Object destinationInventory, DeliveryCallback callback);
     }
 
-    interface DeliveryCallback {
-        void delivered(Object destination, int amount);
+    interface DeliveryCallback extends ItemPacketDeliveryCallback {
     }
 
     UUID ownerFromPlayer(Object player);
@@ -61,6 +146,17 @@ public interface QuarryPlatform {
     void placeGlassFrame(Object world, int minX, int minY, int minZ, int maxX, int maxY, int maxZ);
     void removeGlassFrame(Object world, int minX, int minY, int minZ, int maxX, int maxY, int maxZ);
     boolean isGlassFrameBlock(Object loc);
+
+    /**
+     * Pipe-side filter hook.
+     *
+     * Called during quarry output routing when selecting a destination inventory.
+     * The {@code pipeLocAdjacentToInventory} is the pipe block that is directly touching the inventory,
+     * and the filter (if any) is expected to be attached to the pipe face pointing into that inventory.
+     */
+    default boolean allowsPipeFilter(Object pipeLocAdjacentToInventory, Object inventoryLoc, Object itemStack) {
+        return true;
+    }
 
     /**
      * Power system hooks (CFE).
@@ -90,13 +186,9 @@ public interface QuarryPlatform {
         Object ctrl = controllerLoc;
         if (ctrl == null) return false;
 
-        final int[][] dirs = new int[][] {
-            {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
-        };
-
         // Direct adjacent inventory
-        for (int[] dir : dirs) {
-            Object adj = offset(ctrl, dir[0], dir[1], dir[2]);
+        for (int dirIndex = 0; dirIndex < 6; dirIndex++) {
+            Object adj = offset(ctrl, DirIndex.dx(dirIndex), DirIndex.dy(dirIndex), DirIndex.dz(dirIndex));
             if (isInventory(adj)) return true;
         }
 
@@ -106,8 +198,8 @@ public interface QuarryPlatform {
 
         // Find adjacent pipe
         dev.cloudframe.common.pipes.PipeNode start = null;
-        for (int[] dir : dirs) {
-            Object adj = offset(ctrl, dir[0], dir[1], dir[2]);
+        for (int dirIndex = 0; dirIndex < 6; dirIndex++) {
+            Object adj = offset(ctrl, DirIndex.dx(dirIndex), DirIndex.dy(dirIndex), DirIndex.dz(dirIndex));
             var node = pipes.getPipe(adj);
             if (node != null) { start = node; break; }
         }

@@ -53,6 +53,16 @@ public class FabricWrenchMarkerActivationListener {
                 return ActionResult.PASS;
             }
 
+            // Let the wrench's pipe-connection toggle logic handle tube blocks.
+            if (CloudFrameContent.getTubeBlock() != null && clickedState.isOf(CloudFrameContent.getTubeBlock())) {
+                return ActionResult.PASS;
+            }
+
+            // Let the wrench's cable-connection toggle logic handle cloud cables.
+            if (CloudFrameContent.getCloudCableBlock() != null && clickedState.isOf(CloudFrameContent.getCloudCableBlock())) {
+                return ActionResult.PASS;
+            }
+
             // Scan nearby blocks for markers
             List<BlockPos> foundMarkers = scanForMarkers((ServerWorld) world, clickPos);
 

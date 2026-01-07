@@ -1,6 +1,8 @@
 package dev.cloudframe.fabric.power;
 
 import dev.cloudframe.fabric.content.CloudFrameContent;
+import dev.cloudframe.fabric.CloudFrameFabric;
+import dev.cloudframe.common.quarry.Quarry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.block.BlockState;
 import net.minecraft.server.MinecraftServer;
@@ -52,6 +54,42 @@ public final class PowerProbeServer {
             externalEndpointCount = info.externalEndpointCount();
             externalStored = info.externalStoredCfe();
             externalCapacity = info.externalCapacityCfe();
+        } else if (CloudFrameContent.getQuarryControllerBlock() != null && state.isOf(CloudFrameContent.getQuarryControllerBlock())) {
+            type = PowerProbePackets.TYPE_QUARRY_CONTROLLER;
+            CloudFrameFabric inst = CloudFrameFabric.instance();
+            Quarry q = (inst != null && inst.getQuarryManager() != null)
+                ? inst.getQuarryManager().getByController(GlobalPos.create(world.getRegistryKey(), pos.toImmutable()))
+                : null;
+
+            int controllerState;
+            if (q == null) {
+                controllerState = 0;
+            } else if (q.isScanningMetadata()) {
+                controllerState = 4;
+            } else if (q.isScanning()) {
+                controllerState = 3;
+            } else if (q.isActive()) {
+                controllerState = 2;
+            } else {
+                controllerState = 1;
+            }
+
+            // For controllers, the probe is meant to be a quick read of the quarry's own power draw.
+            // We encode: produced = receiving (actual), stored = using (required).
+            if (q != null && q.isActive()) {
+                produced = Math.max(0L, q.getPowerReceivedCfePerTick());
+                stored = Math.max(0L, q.getPowerRequiredCfePerTick());
+            } else {
+                produced = 0L;
+                stored = 0L;
+            }
+
+            // No external segment for controller probe.
+            externalApiPresent = false;
+            // Reuse this int field for quarry/controller state (0..4) to avoid expanding the payload.
+            externalEndpointCount = controllerState;
+            externalStored = 0L;
+            externalCapacity = 0L;
         } else if (CloudFrameContent.getStratusPanelBlock() != null && state.isOf(CloudFrameContent.getStratusPanelBlock())) {
             type = PowerProbePackets.TYPE_STRATUS_PANEL;
             produced = FabricPowerNetworkManager.measureStratusPanelCfePerTick(world, pos);

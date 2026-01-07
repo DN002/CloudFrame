@@ -10,6 +10,7 @@ import java.util.Map;
 import dev.cloudframe.fabric.content.CloudFrameContent;
 import dev.cloudframe.fabric.content.CloudCellBlockEntity;
 import dev.cloudframe.fabric.power.EnergyInterop;
+import dev.cloudframe.fabric.CloudFrameFabric;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -266,6 +267,63 @@ public final class FabricPowerNetworkManager {
         );
     }
 
+    /**
+     * Read-only probe info for the cable network adjacent to a controller block.
+     * This does NOT consume power.
+     */
+    public static CableProbeInfo measureControllerNetworkForProbe(MinecraftServer server, GlobalPos controllerPos) {
+        if (server == null || controllerPos == null) {
+            return new CableProbeInfo(0L, 0L, EnergyInterop.isAvailable(), 0, 0L, 0L);
+        }
+
+        ServerWorld world = server.getWorld(controllerPos.dimension());
+        if (world == null) {
+            return new CableProbeInfo(0L, 0L, EnergyInterop.isAvailable(), 0, 0L, 0L);
+        }
+
+        NetworkDiscovery discovery = discoverNetwork(world, controllerPos.pos());
+        if (discovery == null) {
+            return new CableProbeInfo(0L, 0L, EnergyInterop.isAvailable(), 0, 0L, 0L);
+        }
+
+        long stored = 0L;
+        if (discovery.cells != null && !discovery.cells.isEmpty()) {
+            for (GlobalPos cellPos : discovery.cells) {
+                ServerWorld w = server.getWorld(cellPos.dimension());
+                if (w == null) continue;
+                if (w.getBlockEntity(cellPos.pos()) instanceof CloudCellBlockEntity be) {
+                    stored += Math.max(0L, be.getStoredCfe());
+                }
+            }
+        }
+
+        boolean externalApiPresent = EnergyInterop.isAvailable();
+        int externalCount = 0;
+        long externalStored = 0L;
+        long externalCapacity = 0L;
+
+        if (externalApiPresent && discovery.external != null && !discovery.external.isEmpty()) {
+            for (ExternalEndpoint ep : discovery.external) {
+                ServerWorld w = server.getWorld(ep.pos().dimension());
+                if (w == null) continue;
+                EnergyInterop.ExternalEnergyInfo info = EnergyInterop.tryMeasureExternalCfe(w, ep.pos().pos(), ep.side());
+                if (info == null) continue;
+                externalCount++;
+                externalStored += Math.max(0L, info.storedCfe());
+                externalCapacity += Math.max(0L, info.capacityCfe());
+            }
+        }
+
+        return new CableProbeInfo(
+            Math.max(0L, discovery.producedCfePerTick),
+            Math.max(0L, stored),
+            externalApiPresent,
+            Math.max(0, externalCount),
+            Math.max(0L, externalStored),
+            Math.max(0L, externalCapacity)
+        );
+    }
+
     public static NetworkInfo measureNetwork(MinecraftServer server, Object controllerLoc) {
         if (server == null) return new NetworkInfo(0L, 0L);
         if (!(controllerLoc instanceof GlobalPos controller)) return new NetworkInfo(0L, 0L);
@@ -311,7 +369,7 @@ public final class FabricPowerNetworkManager {
 
         for (Direction d : Direction.values()) {
             BlockPos adj = controllerPos.offset(d);
-            if (isCable(world, adj)) {
+            if (isCable(world, adj) && !isExternalSideDisabled(world, adj, d.getOpposite())) {
                 long k = adj.asLong();
                 if (visited.add(k)) {
                     queue.add(adj);
@@ -341,6 +399,7 @@ public final class FabricPowerNetworkManager {
 
             // Discover adjacent producers/storage.
             for (Direction d : Direction.values()) {
+                if (isExternalSideDisabled(world, pos, d)) continue;
                 BlockPos n = pos.offset(d);
                 if (isStratusPanel(world, n)) {
                     stratusPanels.add(n.asLong());
@@ -365,6 +424,8 @@ public final class FabricPowerNetworkManager {
             for (Direction d : Direction.values()) {
                 BlockPos n = pos.offset(d);
                 if (!isCable(world, n)) continue;
+                if (isExternalSideDisabled(world, pos, d)) continue;
+                if (isExternalSideDisabled(world, n, d.getOpposite())) continue;
                 long nk = n.asLong();
                 if (visited.add(nk)) {
                     queue.add(n);
@@ -423,6 +484,7 @@ public final class FabricPowerNetworkManager {
             if (key < root) root = key;
 
             for (Direction d : Direction.values()) {
+                if (isExternalSideDisabled(world, pos, d)) continue;
                 BlockPos n = pos.offset(d);
                 if (isStratusPanel(world, n)) {
                     stratusPanels.add(n.asLong());
@@ -444,6 +506,8 @@ public final class FabricPowerNetworkManager {
             for (Direction d : Direction.values()) {
                 BlockPos n = pos.offset(d);
                 if (!isCable(world, n)) continue;
+                if (isExternalSideDisabled(world, pos, d)) continue;
+                if (isExternalSideDisabled(world, n, d.getOpposite())) continue;
                 long nk = n.asLong();
                 if (visited.add(nk)) {
                     queue.add(n);
@@ -483,5 +547,26 @@ public final class FabricPowerNetworkManager {
 
     private static boolean isCloudCell(ServerWorld world, BlockPos pos) {
         return CloudFrameContent.getCloudCellBlock() != null && world.getBlockState(pos).isOf(CloudFrameContent.getCloudCellBlock());
+    }
+
+    private static boolean isExternalSideDisabled(ServerWorld world, BlockPos cablePos, Direction side) {
+        if (world == null || cablePos == null || side == null) return false;
+
+        CloudFrameFabric instance = CloudFrameFabric.instance();
+        if (instance == null || instance.getCableConnectionManager() == null) return false;
+
+        int dirIndex = switch (side) {
+            case EAST -> 0;
+            case WEST -> 1;
+            case UP -> 2;
+            case DOWN -> 3;
+            case SOUTH -> 4;
+            case NORTH -> 5;
+        };
+
+        return instance.getCableConnectionManager().isSideDisabled(
+            GlobalPos.create(world.getRegistryKey(), cablePos.toImmutable()),
+            dirIndex
+        );
     }
 }

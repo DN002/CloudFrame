@@ -7,6 +7,7 @@ import dev.cloudframe.fabric.power.EnergyInterop;
 import dev.cloudframe.fabric.quarry.controller.QuarryControllerBlockEntity;
 import dev.cloudframe.fabric.quarry.controller.QuarryControllerBlock;
 import dev.cloudframe.fabric.quarry.controller.QuarryControllerScreenHandler;
+import dev.cloudframe.fabric.pipes.filter.PipeFilterScreenHandler;
 import net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityTypeBuilder;
 import net.minecraft.block.Block;
 import net.minecraft.block.AbstractBlock;
@@ -35,6 +36,7 @@ public final class CloudFrameContent {
     public static final Identifier CONTROLLER_ID = Identifier.of(CloudFrameFabric.MOD_ID, "quarry_controller");
     public static final Identifier MARKER_ID = Identifier.of(CloudFrameFabric.MOD_ID, "marker");
     public static final Identifier WRENCH_ID = Identifier.of(CloudFrameFabric.MOD_ID, "wrench");
+    public static final Identifier PIPE_FILTER_ID = Identifier.of(CloudFrameFabric.MOD_ID, "pipe_filter");
     public static final Identifier SILK_TOUCH_AUGMENT_ID = Identifier.of(CloudFrameFabric.MOD_ID, "silk_touch_augment");
     public static final Identifier SPEED_AUGMENT_1_ID = Identifier.of(CloudFrameFabric.MOD_ID, "speed_augment_1");
     public static final Identifier SPEED_AUGMENT_2_ID = Identifier.of(CloudFrameFabric.MOD_ID, "speed_augment_2");
@@ -56,6 +58,7 @@ public final class CloudFrameContent {
     public static Item QUARRY_CONTROLLER;
     public static Item MARKER;
     public static Item WRENCH;
+    public static Item PIPE_FILTER;
     public static Item SILK_TOUCH_AUGMENT;
     public static Item SPEED_AUGMENT_1;
     public static Item SPEED_AUGMENT_2;
@@ -65,6 +68,7 @@ public final class CloudFrameContent {
     private static BlockEntityType<QuarryControllerBlockEntity> quarryControllerBE;
     private static BlockEntityType<CloudCellBlockEntity> cloudCellBE;
     private static ScreenHandlerType<QuarryControllerScreenHandler> quarryControllerScreenHandler;
+    private static ScreenHandlerType<PipeFilterScreenHandler> pipeFilterScreenHandler;
 
     public static Block getQuarryControllerBlock() {
         return QUARRY_CONTROLLER_BLOCK;
@@ -98,6 +102,10 @@ public final class CloudFrameContent {
         return WRENCH;
     }
 
+    public static Item getPipeFilter() {
+        return PIPE_FILTER;
+    }
+
     public static Item getSilkTouchAugment() {
         return SILK_TOUCH_AUGMENT;
     }
@@ -121,6 +129,10 @@ public final class CloudFrameContent {
 
     public static ScreenHandlerType<QuarryControllerScreenHandler> getQuarryControllerScreenHandler() {
         return quarryControllerScreenHandler;
+    }
+
+    public static ScreenHandlerType<PipeFilterScreenHandler> getPipeFilterScreenHandler() {
+        return pipeFilterScreenHandler;
     }
 
     private static RegistryKey<Item> itemKey(Identifier id) {
@@ -246,6 +258,12 @@ public final class CloudFrameContent {
             new WrenchItem(new Item.Settings().maxCount(1).registryKey(itemKey(WRENCH_ID)))
         );
 
+        PIPE_FILTER = Registry.register(
+            Registries.ITEM,
+            PIPE_FILTER_ID,
+            new Item(new Item.Settings().registryKey(itemKey(PIPE_FILTER_ID)))
+        );
+
         SILK_TOUCH_AUGMENT = Registry.register(
             Registries.ITEM,
             SILK_TOUCH_AUGMENT_ID,
@@ -290,6 +308,12 @@ public final class CloudFrameContent {
             Registries.SCREEN_HANDLER,
             Identifier.of(CloudFrameFabric.MOD_ID, "quarry_controller"),
             new ScreenHandlerType<>(QuarryControllerScreenHandler::new, FeatureFlags.VANILLA_FEATURES)
+        );
+
+        pipeFilterScreenHandler = Registry.register(
+            Registries.SCREEN_HANDLER,
+            Identifier.of(CloudFrameFabric.MOD_ID, "pipe_filter"),
+            new ScreenHandlerType<>(PipeFilterScreenHandler::new, FeatureFlags.VANILLA_FEATURES)
         );
 
         // Startup sanity: log what actually got registered.

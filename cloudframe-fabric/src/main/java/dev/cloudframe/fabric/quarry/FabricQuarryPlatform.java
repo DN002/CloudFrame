@@ -3,13 +3,24 @@ package dev.cloudframe.fabric.quarry;
 import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import dev.cloudframe.common.quarry.QuarryPlatform;
 import dev.cloudframe.common.pipes.ItemPacketManager;
 import dev.cloudframe.common.pipes.PipeNetworkManager;
+import dev.cloudframe.common.platform.items.InventoryCapacity;
+import dev.cloudframe.common.platform.items.InventoryInsert;
+import dev.cloudframe.common.platform.items.ItemStackKeyAdapter;
+import dev.cloudframe.common.platform.items.SlottedInventoryAdapter;
+import dev.cloudframe.common.platform.world.LocationKeyAdapter;
+import dev.cloudframe.common.platform.world.LocationNormalizationPolicy;
+import dev.cloudframe.common.platform.world.WorldKeyAdapter;
+import dev.cloudframe.common.util.Debug;
+import dev.cloudframe.common.util.DebugManager;
+import dev.cloudframe.fabric.CloudFrameFabric;
 import dev.cloudframe.fabric.pipes.FabricPacketService;
+import dev.cloudframe.fabric.pipes.FabricItemStackAdapter;
 import dev.cloudframe.fabric.power.FabricPowerNetworkManager;
 import dev.cloudframe.fabric.content.CloudFrameContent;
 import net.minecraft.block.Block;
@@ -38,6 +49,9 @@ import net.minecraft.world.World;
 
 public class FabricQuarryPlatform implements QuarryPlatform {
 
+    private static final Debug debug = DebugManager.get(FabricQuarryPlatform.class);
+    private static final AtomicBoolean warnedBlockPos = new AtomicBoolean(false);
+
     private final MinecraftServer server;
     private final PipeNetworkManager pipeManager;
     private final ItemPacketManager packetManager;
@@ -46,6 +60,30 @@ public class FabricQuarryPlatform implements QuarryPlatform {
     private static final int MAX_GLASS_FRAME_UPDATES_PER_TICK = 256;
 
     private final ArrayDeque<GlassFrameRemovalJob> pendingFrameRemovals = new ArrayDeque<>();
+
+    private static final SlottedInventoryAdapter<Inventory, ItemStack> INVENTORY = new SlottedInventoryAdapter<>() {
+        @Override
+        public int size(Inventory inventory) {
+            return inventory == null ? 0 : inventory.size();
+        }
+
+        @Override
+        public ItemStack getStack(Inventory inventory, int slot) {
+            return inventory == null ? ItemStack.EMPTY : inventory.getStack(slot);
+        }
+
+        @Override
+        public void setStack(Inventory inventory, int slot, ItemStack stack) {
+            if (inventory == null) return;
+            inventory.setStack(slot, stack);
+        }
+
+        @Override
+        public void markDirty(Inventory inventory) {
+            if (inventory == null) return;
+            inventory.markDirty();
+        }
+    };
 
     private static final class GlassFrameRemovalJob {
         final RegistryKey<World> worldKey;
@@ -88,65 +126,50 @@ public class FabricQuarryPlatform implements QuarryPlatform {
 
     @Override
     public boolean hasValidOutput(Object controllerLoc) {
-        // First, try the normal cached-network check.
-        if (QuarryPlatform.super.hasValidOutput(controllerLoc)) return true;
+        if (controllerLoc == null || pipeManager == null) return false;
 
-        // Fabric pipes are real blocks. If the PipeNetworkManager cache is missing entries
-        // (e.g., from older worlds or DB reset), lazily index the currently-loaded pipe network
-        // starting from any pipe adjacent to the controller.
-        if (controllerLoc == null) return false;
+        return pipeManager.hasValidOutputFrom(controllerLoc, (loc) -> {
+            ServerWorld world = worldOf(null, loc);
+            BlockPos pos = posOf(loc);
+            if (world == null || pos == null) return false;
+            if (CloudFrameContent.getTubeBlock() == null) return false;
+            return world.getBlockState(pos).isOf(CloudFrameContent.getTubeBlock());
+        }, 8192);
+    }
 
-        ServerWorld world = worldOf(null, controllerLoc);
-        BlockPos ctrlPos = posOf(controllerLoc);
-        if (world == null || ctrlPos == null) return false;
+    @Override
+    public boolean allowsPipeFilter(Object pipeLocAdjacentToInventory, Object inventoryLoc, Object itemStack) {
+        if (!(itemStack instanceof ItemStack stack)) return true;
 
-        final int maxScanPipes = 8192;
+        CloudFrameFabric instance = CloudFrameFabric.instance();
+        if (instance == null || instance.getPipeFilterManager() == null) return true;
 
-        boolean foundInventory = false;
-        java.util.ArrayDeque<BlockPos> queue = new java.util.ArrayDeque<>();
-        java.util.HashSet<BlockPos> visited = new java.util.HashSet<>();
+        ServerWorld world = worldOf(null, pipeLocAdjacentToInventory);
+        BlockPos pipePos = posOf(pipeLocAdjacentToInventory);
+        if (world == null || pipePos == null) return true;
 
-        for (int[] dir : dev.cloudframe.common.pipes.PipeNetworkManager.DIRS) {
-            BlockPos adj = ctrlPos.add(dir[0], dir[1], dir[2]);
-            if (world.getBlockState(adj).isOf(CloudFrameContent.getTubeBlock())) {
-                queue.add(adj.toImmutable());
-            }
-        }
+        BlockPos invPos = posOf(inventoryLoc);
+        if (invPos == null) return true;
 
-        while (!queue.isEmpty() && visited.size() < maxScanPipes) {
-            BlockPos pos = queue.pollFirst();
-            if (pos == null) continue;
-            if (!visited.add(pos)) continue;
+        int sideIndex = dirIndexBetween(pipePos, invPos);
+        if (sideIndex < 0) return true;
 
-            GlobalPos gp = GlobalPos.create(world.getRegistryKey(), pos);
-            if (pipeManager != null && pipeManager.getPipe(gp) == null) {
-                pipeManager.addPipe(gp);
-            }
-
-            for (int[] dir : dev.cloudframe.common.pipes.PipeNetworkManager.DIRS) {
-                BlockPos adj = pos.add(dir[0], dir[1], dir[2]);
-
-                // Inventory adjacent to any pipe counts as valid output.
-                BlockEntity be = world.getBlockEntity(adj);
-                if (be instanceof Inventory) {
-                    foundInventory = true;
-                }
-
-                // Continue BFS through connected pipe blocks.
-                if (world.getBlockState(adj).isOf(CloudFrameContent.getTubeBlock())) {
-                    if (!visited.contains(adj)) {
-                        queue.add(adj.toImmutable());
-                    }
-                }
-            }
-        }
-
-        // Re-check using the now-indexed manager (keeps behavior consistent with routing).
-        return foundInventory || QuarryPlatform.super.hasValidOutput(controllerLoc);
+        GlobalPos gp = GlobalPos.create(world.getRegistryKey(), pipePos.toImmutable());
+        return instance.getPipeFilterManager().allows(gp, sideIndex, stack);
     }
 
     private ServerWorld overworld() {
         return server.getOverworld();
+    }
+
+    private static void warnBlockPosOnce(String methodName) {
+        LocationNormalizationPolicy.warnAssumingDefaultWorld(
+                warnedBlockPos,
+                debug,
+                methodName,
+                "BlockPos",
+                World.OVERWORLD.getValue().toString()
+        );
     }
 
     private BlockPos posOf(Object loc) {
@@ -293,7 +316,10 @@ public class FabricQuarryPlatform implements QuarryPlatform {
         if (loc instanceof GlobalPos gp) {
             return GlobalPos.create(gp.dimension(), gp.pos().toImmutable());
         }
-        if (loc instanceof BlockPos pos) return pos.toImmutable();
+        if (loc instanceof BlockPos pos) {
+            warnBlockPosOnce("normalize");
+            return GlobalPos.create(World.OVERWORLD, pos.toImmutable());
+        }
         return loc;
     }
 
@@ -302,7 +328,10 @@ public class FabricQuarryPlatform implements QuarryPlatform {
         if (loc instanceof GlobalPos gp) {
             return GlobalPos.create(gp.dimension(), gp.pos().add(dx, dy, dz));
         }
-        if (loc instanceof BlockPos pos) return pos.add(dx, dy, dz);
+        if (loc instanceof BlockPos pos) {
+            warnBlockPosOnce("offset");
+            return GlobalPos.create(World.OVERWORLD, pos.add(dx, dy, dz));
+        }
         return loc;
     }
 
@@ -480,66 +509,43 @@ public class FabricQuarryPlatform implements QuarryPlatform {
     public int addToInventory(Object inventoryHolder, Object itemStack) {
         if (!(inventoryHolder instanceof Inventory inv)) return 0;
         if (!(itemStack instanceof ItemStack stack)) return 0;
-        
-        int original = stack.getCount();
-        ItemStack remaining = stack.copy();
 
-        for (int i = 0; i < inv.size() && !remaining.isEmpty(); i++) {
-            ItemStack slot = inv.getStack(i);
-            if (ItemStack.areItemsAndComponentsEqual(slot, remaining)) {
-                int space = slot.getMaxCount() - slot.getCount();
-                if (space > 0) {
-                    int transfer = Math.min(space, remaining.getCount());
-                    slot.increment(transfer);
-                    remaining.decrement(transfer);
-                }
-            }
-        }
-
-        for (int i = 0; i < inv.size() && !remaining.isEmpty(); i++) {
-            ItemStack slot = inv.getStack(i);
-            if (slot.isEmpty()) {
-                inv.setStack(i, remaining.copy());
-                remaining.setCount(0);
-            }
-        }
-
-        inv.markDirty();
-        return Math.max(0, original - remaining.getCount());
+        return InventoryInsert.addItem(inv, stack, INVENTORY, FabricItemStackAdapter.INSTANCE);
     }
 
     @Override
-    public boolean hasSpaceFor(Object inventoryHolder, Object itemStack, Map<String, Integer> inFlight) {
-        if (!(inventoryHolder instanceof Inventory inv)) return false;
-        if (!(itemStack instanceof ItemStack stack)) return false;
+    public int totalRoomFor(Object inventoryHolder, Object itemStack) {
+        if (!(inventoryHolder instanceof Inventory inv)) return 0;
+        if (!(itemStack instanceof ItemStack stack)) return 0;
 
-        int remaining = stack.getCount();
-        int max = stack.getMaxCount();
-
-        for (int i = 0; i < inv.size(); i++) {
-            ItemStack slot = inv.getStack(i);
-            if (slot.isEmpty()) {
-                remaining -= max;
-                if (remaining <= 0) return true;
-                continue;
-            }
-            if (!ItemStack.areItemsAndComponentsEqual(slot, stack)) continue;
-            int space = Math.max(0, max - slot.getCount());
-            remaining -= space;
-            if (remaining <= 0) return true;
-        }
-        return false;
+        return InventoryCapacity.totalRoomFor(inv, stack, INVENTORY, FabricItemStackAdapter.INSTANCE);
     }
 
     @Override
-    public String locationKey(Object loc) {
-        BlockPos pos = posOf(loc);
-        if (pos == null) return "null";
-        String dim = "minecraft:overworld";
-        if (loc instanceof GlobalPos gp) {
-            dim = gp.dimension().getValue().toString();
-        }
-        return dim + ":" + pos.getX() + "," + pos.getY() + "," + pos.getZ();
+    public int emptySlotCount(Object inventoryHolder) {
+        if (!(inventoryHolder instanceof Inventory inv)) return 0;
+        return InventoryCapacity.emptySlotCount(inv, INVENTORY, FabricItemStackAdapter.INSTANCE);
+    }
+
+    @Override
+    public LocationKeyAdapter<Object> locationKeyAdapter() {
+        return (obj) -> {
+            BlockPos pos = posOf(obj);
+            if (pos == null) return "null";
+            String dim = "minecraft:overworld";
+            if (obj instanceof GlobalPos gp) {
+                dim = gp.dimension().getValue().toString();
+            }
+            return dim + ":" + pos.getX() + "," + pos.getY() + "," + pos.getZ();
+        };
+    }
+
+    @Override
+    public ItemStackKeyAdapter<Object> itemKeyAdapter() {
+        return (obj) -> {
+            if (!(obj instanceof ItemStack stack)) return "null";
+            return FabricItemStackAdapter.INSTANCE.key(stack);
+        };
     }
 
     @Override
@@ -567,37 +573,55 @@ public class FabricQuarryPlatform implements QuarryPlatform {
     @Override
     public Object worldOf(Object loc) {
         if (loc instanceof GlobalPos gp) return gp.dimension();
+        if (loc instanceof BlockPos) {
+            warnBlockPosOnce("worldOf");
+        }
         return overworld().getRegistryKey();
     }
 
     @Override
     public Object worldByName(String name) {
-        if (name == null || name.isBlank()) {
-            return overworld().getRegistryKey();
-        }
-        try {
-            Identifier id = Identifier.of(name);
-            return RegistryKey.of(RegistryKeys.WORLD, id);
-        } catch (Throwable ignored) {
-            return overworld().getRegistryKey();
-        }
+        return QuarryPlatform.super.worldByName(name);
     }
 
     @Override
     public String worldName(Object world) {
-        if (world instanceof ServerWorld sw) {
-            return sw.getRegistryKey().getValue().toString();
-        }
-        if (world instanceof RegistryKey<?> k) {
-            try {
-                @SuppressWarnings("unchecked")
-                RegistryKey<World> wk = (RegistryKey<World>) k;
-                return wk.getValue().toString();
-            } catch (Throwable ignored) {
+        return QuarryPlatform.super.worldName(world);
+    }
+
+    @Override
+    public WorldKeyAdapter<Object> worldKeyAdapter() {
+        return new WorldKeyAdapter<>() {
+            @Override
+            public String key(Object world) {
+                if (world instanceof ServerWorld sw) {
+                    return sw.getRegistryKey().getValue().toString();
+                }
+                if (world instanceof RegistryKey<?> k) {
+                    try {
+                        @SuppressWarnings("unchecked")
+                        RegistryKey<World> wk = (RegistryKey<World>) k;
+                        return wk.getValue().toString();
+                    } catch (Throwable ignored) {
+                        return "minecraft:overworld";
+                    }
+                }
                 return "minecraft:overworld";
             }
-        }
-        return "minecraft:overworld";
+
+            @Override
+            public Object worldByKey(String key) {
+                if (key == null || key.isBlank()) {
+                    return overworld().getRegistryKey();
+                }
+                try {
+                    Identifier id = Identifier.of(key);
+                    return RegistryKey.of(RegistryKeys.WORLD, id);
+                } catch (Throwable ignored) {
+                    return overworld().getRegistryKey();
+                }
+            }
+        };
     }
 
     @Override

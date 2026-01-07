@@ -1,6 +1,9 @@
 package dev.cloudframe.fabric.pipes;
 
 import dev.cloudframe.common.pipes.ItemPacketManager;
+import dev.cloudframe.common.platform.items.InventoryInsert;
+import dev.cloudframe.common.platform.items.ItemStackAdapter;
+import dev.cloudframe.common.platform.items.SlottedInventoryAdapter;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.entity.ItemEntity;
@@ -26,6 +29,32 @@ public class FabricItemDeliveryProvider implements ItemPacketManager.IItemDelive
     };
 
     private final MinecraftServer server;
+
+    private static final ItemStackAdapter<ItemStack> STACKS = FabricItemStackAdapter.INSTANCE;
+
+    private static final SlottedInventoryAdapter<Inventory, ItemStack> INVENTORY = new SlottedInventoryAdapter<>() {
+        @Override
+        public int size(Inventory inventory) {
+            return inventory == null ? 0 : inventory.size();
+        }
+
+        @Override
+        public ItemStack getStack(Inventory inventory, int slot) {
+            return inventory == null ? ItemStack.EMPTY : inventory.getStack(slot);
+        }
+
+        @Override
+        public void setStack(Inventory inventory, int slot, ItemStack stack) {
+            if (inventory == null) return;
+            inventory.setStack(slot, stack);
+        }
+
+        @Override
+        public void markDirty(Inventory inventory) {
+            if (inventory == null) return;
+            inventory.markDirty();
+        }
+    };
 
     public FabricItemDeliveryProvider(MinecraftServer server) {
         this.server = server;
@@ -77,33 +106,7 @@ public class FabricItemDeliveryProvider implements ItemPacketManager.IItemDelive
         if (!(inventoryHolder instanceof Inventory inv)) return 0;
         if (!(item instanceof ItemStack stack)) return 0;
 
-        int original = stack.getCount();
-        ItemStack remaining = stack.copy();
-
-        for (int i = 0; i < inv.size() && !remaining.isEmpty(); i++) {
-            ItemStack slot = inv.getStack(i);
-
-            if (ItemStack.areItemsAndComponentsEqual(slot, remaining)) {
-                int space = slot.getMaxCount() - slot.getCount();
-                if (space > 0) {
-                    int transfer = Math.min(space, remaining.getCount());
-                    slot.increment(transfer);
-                    remaining.decrement(transfer);
-                }
-            }
-        }
-
-        for (int i = 0; i < inv.size() && !remaining.isEmpty(); i++) {
-            ItemStack slot = inv.getStack(i);
-
-            if (slot.isEmpty()) {
-                inv.setStack(i, remaining.copy());
-                remaining.setCount(0);
-            }
-        }
-
-        inv.markDirty();
-        return Math.max(0, original - remaining.getCount());
+        return InventoryInsert.addItem(inv, stack, INVENTORY, STACKS);
     }
 
     @Override

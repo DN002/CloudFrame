@@ -8,6 +8,14 @@
     { "when": { "west": "true" }, "apply": { "model": "cloudframe:block/tube_arm", "y": 270 } },
 
     { "when": { "up": "true" }, "apply": { "model": "cloudframe:block/tube_arm", "x": 270 } },
-    { "when": { "down": "true" }, "apply": { "model": "cloudframe:block/tube_arm", "x": 90 } }
+    { "when": { "down": "true" }, "apply": { "model": "cloudframe:block/tube_arm", "x": 90 } },
+
+    { "when": { "filter_north": "true" }, "apply": { "model": "cloudframe:block/tube_filter" } },
+    { "when": { "filter_south": "true" }, "apply": { "model": "cloudframe:block/tube_filter", "y": 180 } },
+    { "when": { "filter_east": "true" }, "apply": { "model": "cloudframe:block/tube_filter", "y": 90 } },
+    { "when": { "filter_west": "true" }, "apply": { "model": "cloudframe:block/tube_filter", "y": 270 } },
+
+    { "when": { "filter_up": "true" }, "apply": { "model": "cloudframe:block/tube_filter", "x": 270 } },
+    { "when": { "filter_down": "true" }, "apply": { "model": "cloudframe:block/tube_filter", "x": 90 } }
   ]
 }

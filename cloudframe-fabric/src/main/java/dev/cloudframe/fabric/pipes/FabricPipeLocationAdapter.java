@@ -4,6 +4,8 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import dev.cloudframe.common.pipes.PipeNetworkManager;
+import dev.cloudframe.common.platform.world.WorldKeyAdapter;
+import dev.cloudframe.common.platform.world.LocationNormalizationPolicy;
 import dev.cloudframe.common.util.Debug;
 import dev.cloudframe.common.util.DebugManager;
 import net.minecraft.block.entity.BlockEntity;
@@ -30,11 +32,13 @@ public class FabricPipeLocationAdapter implements PipeNetworkManager.ILocationAd
     }
 
     private static void warnBlockPosOnce(String methodName) {
-        if (warnedBlockPos.compareAndSet(false, true)) {
-            debug.log(methodName,
-                "WARNING: Fabric pipes received a dimension-less BlockPos; assuming overworld. " +
-                "This can cause cross-dimension misrouting. Prefer GlobalPos everywhere.");
-        }
+        LocationNormalizationPolicy.warnAssumingDefaultWorld(
+            warnedBlockPos,
+            debug,
+            methodName,
+            "BlockPos",
+            World.OVERWORLD.getValue().toString()
+        );
     }
 
     @Override
@@ -114,14 +118,49 @@ public class FabricPipeLocationAdapter implements PipeNetworkManager.ILocationAd
     }
 
     @Override
-    public String worldName(Object loc) {
-        if (loc instanceof GlobalPos gp) {
-            return gp.dimension().getValue().toString();
-        }
+    public Object worldOf(Object loc) {
+        if (loc instanceof GlobalPos gp) return gp.dimension();
         if (loc instanceof BlockPos) {
-            warnBlockPosOnce("worldName");
+            warnBlockPosOnce("worldOf");
+            return World.OVERWORLD;
         }
-        return World.OVERWORLD.getValue().toString();
+        return World.OVERWORLD;
+    }
+
+    @Override
+    public WorldKeyAdapter<Object> worldKeyAdapter() {
+        return new WorldKeyAdapter<>() {
+            @Override
+            public String key(Object world) {
+                if (world instanceof RegistryKey<?> k) {
+                    try {
+                        @SuppressWarnings("unchecked")
+                        RegistryKey<World> wk = (RegistryKey<World>) k;
+                        return wk.getValue().toString();
+                    } catch (Throwable ignored) {
+                        return World.OVERWORLD.getValue().toString();
+                    }
+                }
+                if (world instanceof ServerWorld sw) {
+                    return sw.getRegistryKey().getValue().toString();
+                }
+                if (world instanceof String s && !s.isBlank()) {
+                    return s;
+                }
+                return World.OVERWORLD.getValue().toString();
+            }
+
+            @Override
+            public Object worldByKey(String name) {
+                if (name == null || name.isBlank()) return World.OVERWORLD;
+                try {
+                    Identifier id = Identifier.of(name);
+                    return RegistryKey.of(RegistryKeys.WORLD, id);
+                } catch (Throwable ignored) {
+                    return World.OVERWORLD;
+                }
+            }
+        };
     }
 
     @Override
@@ -168,13 +207,7 @@ public class FabricPipeLocationAdapter implements PipeNetworkManager.ILocationAd
 
     @Override
     public Object worldByName(String name) {
-        if (name == null || name.isBlank()) return World.OVERWORLD;
-        try {
-            Identifier id = Identifier.of(name);
-            return RegistryKey.of(RegistryKeys.WORLD, id);
-        } catch (Throwable ignored) {
-            return World.OVERWORLD;
-        }
+        return PipeNetworkManager.ILocationAdapter.super.worldByName(name);
     }
 
     @Override

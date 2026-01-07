@@ -9,9 +9,13 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.shape.VoxelShape;
 import net.minecraft.util.shape.VoxelShapes;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.WorldAccess;
 import net.minecraft.world.WorldView;
 import net.minecraft.block.ShapeContext;
+import net.minecraft.world.World;
+import dev.cloudframe.fabric.CloudFrameFabric;
+import net.minecraft.util.math.GlobalPos;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -105,7 +109,7 @@ public class CloudCableBlock extends Block {
         BlockState neighborState,
         net.minecraft.util.math.random.Random random
     ) {
-        boolean connected = connectsTo(world, neighborState);
+        boolean connected = shouldConnect(world, pos, direction, neighborPos, neighborState);
         return switch (direction) {
             case NORTH -> state.with(NORTH, connected);
             case SOUTH -> state.with(SOUTH, connected);
@@ -118,41 +122,82 @@ public class CloudCableBlock extends Block {
 
     private BlockState updateConnections(BlockState state, WorldAccess world, BlockPos pos) {
         return state
-            .with(NORTH, connectsTo(world, world.getBlockState(pos.north())))
-            .with(SOUTH, connectsTo(world, world.getBlockState(pos.south())))
-            .with(EAST, connectsTo(world, world.getBlockState(pos.east())))
-            .with(WEST, connectsTo(world, world.getBlockState(pos.west())))
-            .with(UP, connectsTo(world, world.getBlockState(pos.up())))
-            .with(DOWN, connectsTo(world, world.getBlockState(pos.down())));
+            .with(NORTH, shouldConnect(world, pos, Direction.NORTH, pos.north(), world.getBlockState(pos.north())))
+            .with(SOUTH, shouldConnect(world, pos, Direction.SOUTH, pos.south(), world.getBlockState(pos.south())))
+            .with(EAST, shouldConnect(world, pos, Direction.EAST, pos.east(), world.getBlockState(pos.east())))
+            .with(WEST, shouldConnect(world, pos, Direction.WEST, pos.west(), world.getBlockState(pos.west())))
+            .with(UP, shouldConnect(world, pos, Direction.UP, pos.up(), world.getBlockState(pos.up())))
+            .with(DOWN, shouldConnect(world, pos, Direction.DOWN, pos.down(), world.getBlockState(pos.down())));
     }
 
-    private boolean connectsTo(WorldView world, BlockState neighborState) {
+    private boolean shouldConnect(WorldView world, BlockPos cablePos, Direction dirToNeighbor, BlockPos neighborPos, BlockState neighborState) {
         if (neighborState == null) return false;
 
-        // Connect to other cloud cables.
-        if (neighborState.getBlock() instanceof CloudCableBlock) return true;
+        // Connect to other cloud cables (user-toggleable per side).
+        if (neighborState.getBlock() instanceof CloudCableBlock) {
+            return !isExternalSideDisabled(world, cablePos, dirToNeighbor)
+                && !isExternalSideDisabled(world, neighborPos, dirToNeighbor.getOpposite());
+        }
 
         // Connect to quarry controller.
         if (CloudFrameContent.getQuarryControllerBlock() != null
             && neighborState.isOf(CloudFrameContent.getQuarryControllerBlock())) {
-            return true;
+            return !isExternalSideDisabled(world, cablePos, dirToNeighbor);
         }
 
         // Connect to stratus panel.
         if (CloudFrameContent.getStratusPanelBlock() != null
             && neighborState.isOf(CloudFrameContent.getStratusPanelBlock())) {
-            return true;
+            return !isExternalSideDisabled(world, cablePos, dirToNeighbor);
         }
 
         // Connect to cloud turbine.
         if (CloudFrameContent.getCloudTurbineBlock() != null
             && neighborState.isOf(CloudFrameContent.getCloudTurbineBlock())) {
-            return true;
+            return !isExternalSideDisabled(world, cablePos, dirToNeighbor);
         }
 
         // Connect to cloud cell.
-        return CloudFrameContent.getCloudCellBlock() != null
-            && neighborState.isOf(CloudFrameContent.getCloudCellBlock());
+        if (CloudFrameContent.getCloudCellBlock() != null
+            && neighborState.isOf(CloudFrameContent.getCloudCellBlock())) {
+            return !isExternalSideDisabled(world, cablePos, dirToNeighbor);
+        }
+
+        return false;
+    }
+
+    private static boolean isExternalSideDisabled(WorldView world, BlockPos cablePos, Direction side) {
+        if (!(world instanceof World w)) return false;
+
+        CloudFrameFabric instance = CloudFrameFabric.instance();
+        if (instance == null || instance.getCableConnectionManager() == null) return false;
+        MinecraftServer srv = w.getServer();
+        if (srv == null) return false;
+
+        var mgr = instance.getCableConnectionManager();
+        var nodePos = GlobalPos.create(w.getRegistryKey(), cablePos.toImmutable());
+
+        int dirIndex = switch (side) {
+            case EAST -> 0;
+            case WEST -> 1;
+            case UP -> 2;
+            case DOWN -> 3;
+            case SOUTH -> 4;
+            case NORTH -> 5;
+        };
+
+        return mgr.isSideDisabled(nodePos, dirIndex);
+    }
+
+    public static void refreshConnections(World world, BlockPos pos) {
+        if (world == null || pos == null) return;
+        BlockState state = world.getBlockState(pos);
+        if (!(state.getBlock() instanceof CloudCableBlock cable)) return;
+
+        BlockState updated = cable.updateConnections(state, world, pos);
+        if (updated != state) {
+            world.setBlockState(pos, updated, Block.NOTIFY_ALL);
+        }
     }
 
     @Override

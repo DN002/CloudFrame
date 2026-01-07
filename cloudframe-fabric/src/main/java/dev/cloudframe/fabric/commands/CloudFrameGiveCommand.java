@@ -40,6 +40,8 @@ public final class CloudFrameGiveCommand {
         Map<String, Item> items = new LinkedHashMap<>();
         // Primary naming
         items.put("pipe", CloudFrameContent.TUBE);
+        items.put("pipe_filter", CloudFrameContent.getPipeFilter());
+        items.put("filter", CloudFrameContent.getPipeFilter());
         items.put("cable", CloudFrameContent.CLOUD_CABLE);
         items.put("cloud_cable", CloudFrameContent.CLOUD_CABLE);
         items.put("stratus", CloudFrameContent.STRATUS_PANEL);

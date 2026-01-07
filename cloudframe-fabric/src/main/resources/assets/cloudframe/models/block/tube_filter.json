@@ -1,0 +1,21 @@
+{
+  "parent": "minecraft:block/block",
+  "textures": {
+    "side": "cloudframe:item/cloud_tube_arm_end",
+    "particle": "cloudframe:item/cloud_tube_arm_end"
+  },
+  "elements": [
+    {
+      "from": [5, 5, 0],
+      "to": [11, 11, 1],
+      "faces": {
+        "north": { "uv": [5, 5, 11, 11], "texture": "#side" },
+        "south": { "uv": [5, 5, 11, 11], "texture": "#side" },
+        "west": { "uv": [0, 5, 1, 11], "texture": "#side" },
+        "east": { "uv": [15, 5, 16, 11], "texture": "#side" },
+        "up": { "uv": [5, 0, 11, 1], "texture": "#side" },
+        "down": { "uv": [5, 15, 11, 16], "texture": "#side" }
+      }
+    }
+  ]
+}

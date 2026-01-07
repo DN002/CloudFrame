@@ -167,8 +167,8 @@ public final class CloudFrameContent {
             TUBE_ID,
             new TubeBlock(
                 AbstractBlock.Settings.copy(Blocks.GLASS)
-                    // Glass breaks instantly; require holding left-click to break.
-                    .strength(2.0f, 6.0f)
+                    .strength(3.0f, 6.0f)  // Requires holding pickaxe to mine
+                    .requiresTool()
                     .registryKey(blockKey(TUBE_ID))
             )
         );
@@ -178,8 +178,8 @@ public final class CloudFrameContent {
             CLOUD_CABLE_ID,
             new CloudCableBlock(
                 AbstractBlock.Settings.copy(Blocks.GLASS)
-                    // Glass breaks instantly; require holding left-click to break.
-                    .strength(2.0f, 6.0f)
+                    .strength(3.0f, 6.0f)  // Requires holding pickaxe to mine
+                    .requiresTool()
                     .registryKey(blockKey(CLOUD_CABLE_ID))
             )
         );
@@ -189,6 +189,7 @@ public final class CloudFrameContent {
             STRATUS_PANEL_ID,
             new StratusPanelBlock(
                 AbstractBlock.Settings.copy(Blocks.IRON_BLOCK)
+                    .requiresTool()  // Requires pickaxe (iron-level)
                     .registryKey(blockKey(STRATUS_PANEL_ID))
             )
         );
@@ -198,6 +199,7 @@ public final class CloudFrameContent {
             CLOUD_TURBINE_ID,
             new CloudTurbineBlock(
                 AbstractBlock.Settings.copy(Blocks.IRON_BLOCK)
+                    .requiresTool()  // Requires pickaxe (iron-level)
                     .registryKey(blockKey(CLOUD_TURBINE_ID))
             )
         );
@@ -207,6 +209,7 @@ public final class CloudFrameContent {
             CLOUD_CELL_ID,
             new CloudCellBlock(
                 AbstractBlock.Settings.copy(Blocks.IRON_BLOCK)
+                    .requiresTool()  // Requires pickaxe (iron-level)
                     .registryKey(blockKey(CLOUD_CELL_ID))
             )
         );
@@ -216,6 +219,7 @@ public final class CloudFrameContent {
             CONTROLLER_ID,
             new QuarryControllerBlock(
                 AbstractBlock.Settings.copy(Blocks.IRON_BLOCK)
+                    .requiresTool()  // Requires pickaxe (iron-level)
                     .registryKey(blockKey(CONTROLLER_ID))
             )
         );
@@ -235,6 +239,7 @@ public final class CloudFrameContent {
             TRASH_CAN_ID,
             new TrashCanBlock(
                 AbstractBlock.Settings.copy(Blocks.IRON_BLOCK)
+                    .requiresTool()  // Requires pickaxe (iron-level)
                     .registryKey(blockKey(TRASH_CAN_ID))
             )
         );

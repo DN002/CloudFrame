@@ -13,6 +13,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.GlobalPos;
 import net.minecraft.util.math.Vec3d;
+import dev.cloudframe.fabric.content.trash.TrashCanBlockEntity;
 
 /**
  * Fabric implementation for item delivery operations.
@@ -103,6 +104,9 @@ public class FabricItemDeliveryProvider implements ItemPacketManager.IItemDelive
 
     @Override
     public int addItem(Object inventoryHolder, Object item) {
+        if (inventoryHolder instanceof TrashCanBlockEntity trash && item instanceof ItemStack stack) {
+            return trash.accept(stack);
+        }
         if (!(inventoryHolder instanceof Inventory inv)) return 0;
         if (!(item instanceof ItemStack stack)) return 0;
 

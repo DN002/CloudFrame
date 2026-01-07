@@ -438,14 +438,35 @@ public class Quarry {
         if (!outputBuffer.isEmpty()) {
             boolean sent = trySendOutput(shouldLog);
             if (!sent) {
-                outputJammed = true;
-                outputJamTicks++;
-
-                // After a short grace period, pause until player fixes the output.
-                if (outputJamTicks >= 40) {
-                    setActive(false);
+                // Preferred behavior: if nothing can accept (filters/full), drop at the controller.
+                // Only do this when we *do* have a valid output network; if output is truly missing,
+                // keep the old jam/pause behavior to avoid voiding items unexpectedly.
+                if (hasValidOutput()) {
+                    Object item = outputBuffer.remove(0);
+                    boolean dropped = platform.dropItemAtController(controller, item);
+                    if (dropped) {
+                        outputJammed = false;
+                        outputJamTicks = 0;
+                        // Continue running; we removed one buffered item.
+                    } else {
+                        // Platform didn't support dropping; fall back to jam behavior.
+                        outputBuffer.add(0, item);
+                        outputJammed = true;
+                        outputJamTicks++;
+                        if (outputJamTicks >= 40) {
+                            setActive(false);
+                        }
+                        return;
+                    }
+                } else {
+                    outputJammed = true;
+                    outputJamTicks++;
+                    // After a short grace period, pause until player fixes the output.
+                    if (outputJamTicks >= 40) {
+                        setActive(false);
+                    }
+                    return;
                 }
-                return;
             }
             outputJammed = false;
             outputJamTicks = 0;

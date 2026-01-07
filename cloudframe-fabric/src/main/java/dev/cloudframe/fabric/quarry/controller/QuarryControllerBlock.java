@@ -9,6 +9,8 @@ import net.minecraft.block.BlockRenderType;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.BlockWithEntity;
 import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.block.entity.BlockEntityTicker;
+import net.minecraft.block.entity.BlockEntityType;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -36,6 +38,18 @@ public class QuarryControllerBlock extends BlockWithEntity {
     @Override
     public BlockEntity createBlockEntity(BlockPos pos, BlockState state) {
         return new QuarryControllerBlockEntity(pos, state);
+    }
+
+    @Override
+    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(World world, BlockState state, BlockEntityType<T> type) {
+        if (world == null || world.isClient()) return null;
+        if (type != CloudFrameContent.getQuarryControllerBlockEntity()) return null;
+
+        return (w, p, s, be) -> {
+            if (be instanceof QuarryControllerBlockEntity qbe) {
+                QuarryControllerBlockEntity.tick(w, p, s, qbe);
+            }
+        };
     }
 
     @Override

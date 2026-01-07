@@ -22,6 +22,7 @@ import net.minecraft.inventory.Inventory;
 import net.minecraft.block.BlockState;
 import net.minecraft.util.ItemScatterer;
 import net.minecraft.util.math.Vec3d;
+import dev.cloudframe.fabric.pipes.filter.PipeFilterItem;
 
 public class WrenchItem extends Item {
 
@@ -93,9 +94,11 @@ public class WrenchItem extends Item {
             if (!wasDisabled && nowDisabled && instance.getPipeFilterManager() != null) {
                 GlobalPos pipePos = GlobalPos.create(world.getRegistryKey(), clickedPos.toImmutable());
                 if (instance.getPipeFilterManager().hasFilter(pipePos, dirIndex)) {
+                    var st = instance.getPipeFilterManager().get(pipePos, dirIndex);
                     instance.getPipeFilterManager().removeFilter(pipePos, dirIndex);
 
                     ItemStack drop = new ItemStack(CloudFrameContent.getPipeFilter(), 1);
+                    PipeFilterItem.writeItemConfigFromFilterState(drop, st);
                     serverPlayer.getInventory().insertStack(drop);
                     if (!drop.isEmpty()) {
                         ItemScatterer.spawn(world, serverPlayer.getX(), serverPlayer.getY() + 0.5, serverPlayer.getZ(), drop);

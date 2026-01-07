@@ -11,6 +11,7 @@ import net.minecraft.screen.ArrayPropertyDelegate;
 import net.minecraft.screen.PropertyDelegate;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
+import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.GlobalPos;
@@ -29,6 +30,9 @@ public class PipeFilterScreenHandler extends ScreenHandler {
     private final GlobalPos pipePos;
     private final int sideIndex;
 
+    private final ItemStack editingItemStack;
+    private final boolean editingItem;
+
     private final FabricPipeFilterManager filterManager;
 
     /**
@@ -38,10 +42,49 @@ public class PipeFilterScreenHandler extends ScreenHandler {
         super(dev.cloudframe.fabric.content.CloudFrameContent.getPipeFilterScreenHandler(), syncId);
         this.pipePos = null;
         this.sideIndex = -1;
+        this.editingItemStack = ItemStack.EMPTY;
+        this.editingItem = false;
         this.filterManager = null;
         this.filterInventory = new SimpleInventory(FabricPipeFilterManager.SLOT_COUNT);
         this.properties = new ArrayPropertyDelegate(1);
         this.addProperties(this.properties);
+        addSlots(playerInventory);
+    }
+
+    /**
+     * Server ctor for editing the filter item itself (NBT-backed).
+     */
+    public PipeFilterScreenHandler(int syncId, PlayerInventory playerInventory, ItemStack editingItemStack) {
+        super(dev.cloudframe.fabric.content.CloudFrameContent.getPipeFilterScreenHandler(), syncId);
+        this.pipePos = null;
+        this.sideIndex = -1;
+        this.editingItemStack = (editingItemStack == null) ? ItemStack.EMPTY : editingItemStack;
+        this.editingItem = true;
+        this.filterManager = null;
+
+        var cfg = PipeFilterItem.readItemConfig(this.editingItemStack);
+
+        ArrayPropertyDelegate delegate = new ArrayPropertyDelegate(1);
+        delegate.set(0, cfg.mode);
+
+        PipeFilterInventory inv = new PipeFilterInventory(FabricPipeFilterManager.SLOT_COUNT, () -> {
+            PipeFilterItem.writeItemConfig(this.editingItemStack, delegate.get(0), copyFilterItems());
+        });
+
+        // Avoid firing markDirty callbacks while we are still populating initial slot contents.
+        inv.setSuppressChanged(true);
+
+        // Assign early so copyFilterItems() is always safe.
+        this.filterInventory = inv;
+
+        for (int i = 0; i < FabricPipeFilterManager.SLOT_COUNT; i++) {
+            inv.setStack(i, cfg.items[i]);
+        }
+
+        inv.setSuppressChanged(false);
+        this.properties = delegate;
+        this.addProperties(delegate);
+
         addSlots(playerInventory);
     }
 
@@ -52,6 +95,8 @@ public class PipeFilterScreenHandler extends ScreenHandler {
         super(dev.cloudframe.fabric.content.CloudFrameContent.getPipeFilterScreenHandler(), syncId);
         this.pipePos = pipePos;
         this.sideIndex = sideIndex;
+        this.editingItemStack = ItemStack.EMPTY;
+        this.editingItem = false;
 
         CloudFrameFabric instance = CloudFrameFabric.instance();
         this.filterManager = instance != null ? instance.getPipeFilterManager() : null;
@@ -64,6 +109,12 @@ public class PipeFilterScreenHandler extends ScreenHandler {
             }
         });
 
+        // Avoid firing markDirty callbacks while we are still populating initial slot contents.
+        inv.setSuppressChanged(true);
+
+        // Assign early so copyFilterItems() is always safe.
+        this.filterInventory = inv;
+
         if (st != null) {
             ItemStack[] initial = st.copyStacks();
             for (int i = 0; i < FabricPipeFilterManager.SLOT_COUNT; i++) {
@@ -71,7 +122,7 @@ public class PipeFilterScreenHandler extends ScreenHandler {
             }
         }
 
-        this.filterInventory = inv;
+        inv.setSuppressChanged(false);
         this.properties = new ArrayPropertyDelegate(1);
         if (st != null) {
             this.properties.set(0, st.mode());
@@ -92,8 +143,9 @@ public class PipeFilterScreenHandler extends ScreenHandler {
             }
         }
 
-        // Player inventory
-        int invY = 18 + UI_ROWS * 18 + 14;
+        // Player inventory (match vanilla GenericContainerScreenHandler spacing)
+        // For 3 rows, vanilla places the first player inventory row at y=85.
+        int invY = 18 + UI_ROWS * 18 + 13;
         for (int row = 0; row < 3; row++) {
             for (int col = 0; col < 9; col++) {
                 int x = 8 + col * 18;
@@ -119,6 +171,47 @@ public class PipeFilterScreenHandler extends ScreenHandler {
     }
 
     @Override
+    public void onSlotClick(int slotIndex, int button, SlotActionType actionType, PlayerEntity player) {
+        int filterSlots = UI_ROWS * 9;
+
+        // Ghost-slot behavior for filter slots.
+        if (slotIndex >= 0 && slotIndex < filterSlots) {
+            Slot slot = this.slots.get(slotIndex);
+            if (slot != null) {
+                ItemStack cursor = this.getCursorStack();
+                ItemStack existing = slot.getStack();
+
+                // Left/right click: copy from cursor without consuming.
+                if (actionType == SlotActionType.PICKUP) {
+                    if (cursor == null || cursor.isEmpty()) {
+                        if (existing != null && !existing.isEmpty()) {
+                            slot.setStack(ItemStack.EMPTY);
+                            slot.markDirty();
+                        }
+                    } else {
+                        ItemStack ghost = cursor.copy();
+                        ghost.setCount(1);
+                        slot.setStack(ghost);
+                        slot.markDirty();
+                    }
+                    return;
+                }
+
+                // Prevent shift-click / hotbar swap / drag / throw from interacting with ghost slots.
+                if (actionType == SlotActionType.QUICK_MOVE
+                    || actionType == SlotActionType.SWAP
+                    || actionType == SlotActionType.QUICK_CRAFT
+                    || actionType == SlotActionType.THROW
+                    || actionType == SlotActionType.CLONE) {
+                    return;
+                }
+            }
+        }
+
+        super.onSlotClick(slotIndex, button, actionType, player);
+    }
+
+    @Override
     public boolean onButtonClick(PlayerEntity player, int id) {
         // 0 = toggle whitelist/blacklist
         if (id == 0) {
@@ -128,7 +221,9 @@ public class PipeFilterScreenHandler extends ScreenHandler {
 
             properties.set(0, nextMode);
 
-            if (filterManager != null && pipePos != null && sideIndex >= 0) {
+            if (editingItem) {
+                PipeFilterItem.writeItemConfig(this.editingItemStack, nextMode, copyFilterItems());
+            } else if (filterManager != null && pipePos != null && sideIndex >= 0) {
                 filterManager.setMode(pipePos, sideIndex, nextMode);
             }
 
@@ -137,11 +232,16 @@ public class PipeFilterScreenHandler extends ScreenHandler {
 
         // 1 = remove filter from pipe
         if (id == 1) {
+            if (editingItem) {
+                return true;
+            }
             if (filterManager != null && pipePos != null && sideIndex >= 0 && player instanceof ServerPlayerEntity sp) {
+                FabricPipeFilterManager.FilterState st = filterManager.get(pipePos, sideIndex);
                 filterManager.removeFilter(pipePos, sideIndex);
 
                 // Return the filter item.
                 ItemStack drop = new ItemStack(CloudFrameContent.getPipeFilter(), 1);
+                PipeFilterItem.writeItemConfigFromFilterState(drop, st);
                 sp.getInventory().insertStack(drop);
                 var server = filterManager.getServer();
                 var w = server != null ? server.getWorld(pipePos.dimension()) : null;
@@ -172,27 +272,35 @@ public class PipeFilterScreenHandler extends ScreenHandler {
 
     @Override
     public ItemStack quickMove(PlayerEntity player, int slotIndex) {
-        ItemStack newStack = ItemStack.EMPTY;
         Slot slot = this.slots.get(slotIndex);
-        if (slot == null || !slot.hasStack()) {
+        if (slot == null || !slot.hasStack()) return ItemStack.EMPTY;
+
+        int filterSlots = UI_ROWS * 9;
+        int playerInvStart = filterSlots;
+        int playerInvEnd = playerInvStart + 27;
+        int hotbarStart = playerInvEnd;
+        int hotbarEnd = hotbarStart + 9;
+
+        // Never quick-move to/from ghost filter slots.
+        if (slotIndex < filterSlots) {
             return ItemStack.EMPTY;
         }
 
         ItemStack original = slot.getStack();
-        newStack = original.copy();
+        ItemStack out = original.copy();
 
-        int filterSlots = UI_ROWS * 9;
-        if (slotIndex < filterSlots) {
-            // From filter -> player
-            if (!this.insertItem(original, filterSlots, this.slots.size(), true)) {
-                return ItemStack.EMPTY;
-            }
+        boolean moved;
+        if (slotIndex >= playerInvStart && slotIndex < playerInvEnd) {
+            // Main inventory -> hotbar
+            moved = this.insertItem(original, hotbarStart, hotbarEnd, false);
+        } else if (slotIndex >= hotbarStart && slotIndex < hotbarEnd) {
+            // Hotbar -> main inventory
+            moved = this.insertItem(original, playerInvStart, playerInvEnd, false);
         } else {
-            // From player -> filter
-            if (!this.insertItem(original, 0, filterSlots, false)) {
-                return ItemStack.EMPTY;
-            }
+            moved = false;
         }
+
+        if (!moved) return ItemStack.EMPTY;
 
         if (original.isEmpty()) {
             slot.setStack(ItemStack.EMPTY);
@@ -200,7 +308,7 @@ public class PipeFilterScreenHandler extends ScreenHandler {
             slot.markDirty();
         }
 
-        return newStack;
+        return out;
     }
 
     private ItemStack[] copyFilterItems() {
@@ -227,21 +335,36 @@ public class PipeFilterScreenHandler extends ScreenHandler {
 
         @Override
         public boolean canInsert(ItemStack stack) {
-            return stack != null && !stack.isEmpty();
+            // Real insertion is handled by ghost-slot click logic.
+            return false;
+        }
+
+        @Override
+        public boolean canTakeItems(PlayerEntity playerEntity) {
+            // Prevent pulling ghost items into inventory.
+            return false;
         }
     }
 
     private static final class PipeFilterInventory extends SimpleInventory {
         private final Runnable onChanged;
+        private boolean suppressChanged;
 
         PipeFilterInventory(int size, Runnable onChanged) {
             super(size);
             this.onChanged = onChanged;
         }
 
+        void setSuppressChanged(boolean suppressChanged) {
+            this.suppressChanged = suppressChanged;
+        }
+
         @Override
         public void markDirty() {
             super.markDirty();
+            if (suppressChanged) {
+                return;
+            }
             if (onChanged != null) {
                 onChanged.run();
             }

@@ -4,19 +4,19 @@ import dev.cloudframe.fabric.CloudFrameFabric;
 import net.minecraft.block.BlockState;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.World;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-@Mixin(ServerWorld.class)
+@Mixin(World.class)
 public class ServerWorldSetBlockStateMixin {
 
     @Inject(
-        // Intermediary name for: ServerWorld#setBlockState(BlockPos, BlockState, int)
-        method = "method_8652(Lnet/minecraft/class_2338;Lnet/minecraft/class_2680;I)Z",
+        // ServerWorld#setBlockState(BlockPos, BlockState, int)
+        method = "setBlockState(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;I)Z",
         at = @At("RETURN"),
-        remap = false,
         require = 0
     )
     private void cloudframe$onSetBlockState3(BlockPos pos, BlockState state, int flags, CallbackInfoReturnable<Boolean> cir) {
@@ -24,10 +24,9 @@ public class ServerWorldSetBlockStateMixin {
     }
 
     @Inject(
-        // Intermediary name for: ServerWorld#setBlockState(BlockPos, BlockState, int, int)
-        method = "method_30092(Lnet/minecraft/class_2338;Lnet/minecraft/class_2680;II)Z",
+        // ServerWorld#setBlockState(BlockPos, BlockState, int, int)
+        method = "setBlockState(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;II)Z",
         at = @At("RETURN"),
-        remap = false,
         require = 0
     )
     private void cloudframe$onSetBlockState4(BlockPos pos, BlockState state, int flags, int maxUpdateDepth, CallbackInfoReturnable<Boolean> cir) {
@@ -44,7 +43,8 @@ public class ServerWorldSetBlockStateMixin {
         Object qm = inst.getQuarryManager();
         if (qm == null) return;
 
-        ServerWorld world = (ServerWorld) (Object) this;
+        World self = (World) (Object) this;
+        if (!(self instanceof ServerWorld world)) return;
 
         // Call into cloudframe-common if the method exists (it may be missing if Gradle is still
         // resolving an older local-Maven jar).

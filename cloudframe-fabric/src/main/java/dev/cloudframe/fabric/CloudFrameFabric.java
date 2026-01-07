@@ -17,15 +17,24 @@ import dev.cloudframe.fabric.quarry.FabricQuarryPlatform;
 import dev.cloudframe.fabric.content.CloudFrameContent;
 import dev.cloudframe.fabric.markers.FabricMarkerManager;
 import dev.cloudframe.fabric.pipes.*;
+import dev.cloudframe.fabric.pipes.filter.PipeFilterItem;
+import dev.cloudframe.fabric.util.ClickSideUtil;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
+import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.item.ItemStack;
+import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
+import net.minecraft.util.ItemScatterer;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.GlobalPos;
 import net.minecraft.server.MinecraftServer;
 
 import java.nio.file.Path;
@@ -131,6 +140,67 @@ public class CloudFrameFabric implements ModInitializer {
 
         // Power probe (wrench look tooltip): register server networking.
         dev.cloudframe.fabric.power.PowerProbeServer.register();
+
+        // Left-click removal for pipe filters (prevents breaking the pipe).
+        AttackBlockCallback.EVENT.register((player, world, hand, pos, direction) -> {
+            if (world.isClient()) return ActionResult.PASS;
+            if (!(player instanceof ServerPlayerEntity serverPlayer)) return ActionResult.PASS;
+
+            if (CloudFrameContent.getTubeBlock() == null) return ActionResult.PASS;
+            if (!world.getBlockState(pos).isOf(CloudFrameContent.getTubeBlock())) return ActionResult.PASS;
+
+            CloudFrameFabric instance = CloudFrameFabric.instance();
+            if (instance == null || instance.getPipeFilterManager() == null) return ActionResult.PASS;
+
+            Direction side = ClickSideUtil.getClickedArmSide(serverPlayer, pos, direction);
+            int sideIndex = ClickSideUtil.toDirIndex(side);
+            GlobalPos pipePos = GlobalPos.create(world.getRegistryKey(), pos.toImmutable());
+
+            if (!instance.getPipeFilterManager().hasFilter(pipePos, sideIndex)) return ActionResult.PASS;
+
+            var st = instance.getPipeFilterManager().get(pipePos, sideIndex);
+            instance.getPipeFilterManager().removeFilter(pipePos, sideIndex);
+
+            ItemStack drop = new ItemStack(CloudFrameContent.getPipeFilter(), 1);
+            PipeFilterItem.writeItemConfigFromFilterState(drop, st);
+            serverPlayer.getInventory().insertStack(drop);
+            if (!drop.isEmpty() && world instanceof ServerWorld sw) {
+                ItemScatterer.spawn(sw, serverPlayer.getX(), serverPlayer.getY() + 0.5, serverPlayer.getZ(), drop);
+            }
+
+            dev.cloudframe.fabric.content.TubeBlock.refreshConnections(world, pos);
+            serverPlayer.sendMessage(Text.literal("§7Removed pipe filter."), true);
+            return ActionResult.SUCCESS;
+        });
+
+        // Shift-right-click in air configures the held pipe filter item.
+        UseItemCallback.EVENT.register((player, world, hand) -> {
+            if (world.isClient()) return ActionResult.PASS;
+            if (!(player instanceof ServerPlayerEntity sp)) return ActionResult.PASS;
+            if (!sp.isSneaking()) return ActionResult.PASS;
+
+            ItemStack stack = sp.getStackInHand(hand);
+            if (stack == null || stack.isEmpty()) return ActionResult.PASS;
+            if (CloudFrameContent.getPipeFilter() == null || !stack.isOf(CloudFrameContent.getPipeFilter())) return ActionResult.PASS;
+
+            if (debug != null) {
+                debug.log("pipeFilter", "UseItemCallback: opening item config GUI (player=" + sp.getName().getString() + ")");
+            }
+
+            sp.openHandledScreen(new net.minecraft.screen.NamedScreenHandlerFactory() {
+                @Override
+                public Text getDisplayName() {
+                    return Text.literal("Pipe Filter");
+                }
+
+                @Override
+                public net.minecraft.screen.ScreenHandler createMenu(int syncId, net.minecraft.entity.player.PlayerInventory inv, net.minecraft.entity.player.PlayerEntity p) {
+                    return new dev.cloudframe.fabric.pipes.filter.PipeFilterScreenHandler(syncId, inv, stack);
+                }
+            });
+
+            return ActionResult.SUCCESS;
+        });
         
         // Register glass frame protection listener
         dev.cloudframe.fabric.listeners.GlassFrameProtectionListener.register();

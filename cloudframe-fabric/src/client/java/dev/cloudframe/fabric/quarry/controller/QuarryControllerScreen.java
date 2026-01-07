@@ -109,89 +109,24 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
         }
 
         int quarryState = handler.getQuarryState();
-        int targetRequired = Math.max(0, handler.getPowerRequiredCfePerTick());
-        int targetReceived = Math.max(0, handler.getPowerReceivedCfePerTick());
+        int bufferCap = Math.max(0, handler.getPowerBufferCapacityCfe());
+        int bufferStored = Math.max(0, handler.getPowerBufferStoredCfe());
 
-        boolean activeNow = targetRequired > 0;
-
-        if (targetRequired > 0) {
-            lastNonZeroTargetUsingCfePerTick = (double) targetRequired;
-        }
-
-        long cacheKey = getPowerAnimCacheKey();
-        long nowMs = System.currentTimeMillis();
-
-        // First tick after opening the screen: if the quarry is already active,
-        // initialize immediately to the current values (no ramp-from-zero).
-        if (lastQuarryState == Integer.MIN_VALUE) {
-            CachedPowerAnim cached = cacheKey != Long.MIN_VALUE ? POWER_ANIM_CACHE.get(cacheKey) : null;
-            if (cached != null && (nowMs - cached.updatedAtMs) <= POWER_ANIM_CACHE_TTL_MS) {
-                animatedPowerFillRatio = Math.min(1.0, Math.max(0.0, cached.fillRatio));
-                animatedPowerUsingCfePerTick = Math.max(0.0, cached.usingCfePerTick);
-                lastNonZeroTargetUsingCfePerTick = Math.max(0.0, cached.lastNonZeroTargetUsingCfePerTick);
-                lastPowerActive = cached.lastPowerActive;
-                lastQuarryState = cached.lastQuarryState;
-                return;
-            }
-
-            if (cached != null) {
-                POWER_ANIM_CACHE.remove(cacheKey);
-            }
-
-            if (activeNow) {
-                double initFill = Math.min(1.0, Math.max(0.0, (double) targetReceived / (double) targetRequired));
-                animatedPowerFillRatio = initFill;
-                // Start at the real required value so steady-state doesn't animate from zero.
-                animatedPowerUsingCfePerTick = (double) targetRequired;
-                lastPowerActive = true;
-            } else {
-                animatedPowerFillRatio = 0.0;
-                animatedPowerUsingCfePerTick = 0.0;
-                lastPowerActive = false;
-            }
-            lastQuarryState = quarryState;
-            cachePowerAnim(nowMs);
-            return;
-        }
-
-        // Only force a visible ramp-up when the quarry transitions from paused->active
-        // while the screen is open (i.e., the user actually toggled it on).
-        boolean wasActive = lastPowerActive;
-        if (activeNow && !wasActive && (lastQuarryState == 1 || lastQuarryState == 0)) {
-            animatedPowerFillRatio = 0.0;
-            animatedPowerUsingCfePerTick = 0.0;
-        }
-
-        lastQuarryState = quarryState;
-
-        lastPowerActive = activeNow;
+        boolean activeNow = handler.isQuarryActive();
 
         double targetFill = 0.0;
-        if (targetRequired > 0) {
-            targetFill = Math.min(1.0, Math.max(0.0, (double) targetReceived / (double) targetRequired));
+        if (bufferCap > 0) {
+            targetFill = Math.min(1.0, Math.max(0.0, (double) bufferStored / (double) bufferCap));
         }
 
-        // Ramp both directions to emulate power rising/falling.
-        if (targetFill > animatedPowerFillRatio) {
-            animatedPowerFillRatio = Math.min(targetFill, animatedPowerFillRatio + POWER_FILL_RISE_STEP);
-        } else if (targetFill < animatedPowerFillRatio) {
-            animatedPowerFillRatio = Math.max(targetFill, animatedPowerFillRatio - POWER_FILL_RISE_STEP);
-        }
+        // Display real server values immediately (no slow ramp).
+        // The quarry already enforces power gating server-side; the UI should not imply otherwise.
+        animatedPowerFillRatio = targetFill;
+        animatedPowerUsingCfePerTick = activeNow ? (double) Math.max(0, handler.getPowerRequiredCfePerTick()) : 0.0;
 
-        // Keep "Power using" animation aligned with the bar animation duration.
-        // (Previously it ramped in whole numbers and reached the target far faster than the bar.)
-        double targetUsing = activeNow ? (double) targetRequired : 0.0;
-
-        if (targetUsing > animatedPowerUsingCfePerTick) {
-            double stepUp = Math.max(0.01, targetUsing / POWER_RAMP_TICKS);
-            animatedPowerUsingCfePerTick = Math.min(targetUsing, animatedPowerUsingCfePerTick + stepUp);
-        } else if (targetUsing < animatedPowerUsingCfePerTick) {
-            double base = lastNonZeroTargetUsingCfePerTick > 0.0 ? lastNonZeroTargetUsingCfePerTick : animatedPowerUsingCfePerTick;
-            double stepDown = Math.max(0.01, base / POWER_RAMP_TICKS);
-            animatedPowerUsingCfePerTick = Math.max(targetUsing, animatedPowerUsingCfePerTick - stepDown);
-        }
-
-        cachePowerAnim(nowMs);
+        lastPowerActive = activeNow;
+        lastQuarryState = quarryState;
+        cachePowerAnim(System.currentTimeMillis());
     }
 
     /**
@@ -444,15 +379,18 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
                 int required = Math.max(0, handler.getPowerRequiredCfePerTick());
                 int received = Math.max(0, handler.getPowerReceivedCfePerTick());
 
+                int stored = Math.max(0, handler.getPowerBufferStoredCfe());
+                int cap = Math.max(0, handler.getPowerBufferCapacityCfe());
+
                 int animatedUsing = Math.max(0, (int) Math.round(animatedPowerUsingCfePerTick));
 
-                lines.add(Text.literal("Power using: " + animatedUsing + " CFE/t").formatted(Formatting.RED));
-                lines.add(Text.literal("Power receiving: " + received + " CFE/t").formatted(Formatting.RED));
+                lines.add(Text.literal("Buffer: " + stored + "/" + cap + " CFE").formatted(Formatting.RED));
 
                 if (required > 0) {
-                    lines.add(Text.literal("Power: " + received + "/" + required + " CFE/t").formatted(Formatting.RED));
+                    lines.add(Text.literal("Using: " + animatedUsing + " CFE/t").formatted(Formatting.RED));
+                    lines.add(Text.literal("Receiving: " + received + " CFE/t").formatted(Formatting.RED));
                 } else {
-                    lines.add(Text.literal("Power: Paused").formatted(Formatting.GRAY));
+                    lines.add(Text.literal("Status: Paused").formatted(Formatting.GRAY));
                 }
 
                 if (handler.isPowerBlocked()) {

@@ -130,7 +130,8 @@ public final class PowerProbeClient {
                 "Cloud Network: +" + formatNumber(produced) + " CFE/t | Stored: " + formatNumber(stored) + " CFE" + formatExternal(externalApiPresent, externalEndpointCount, externalStored, externalCapacity)
             );
             case PowerProbePackets.TYPE_QUARRY_CONTROLLER -> Text.literal(
-                "Quarry Controller (" + formatControllerState(externalEndpointCount) + "): Using " + formatNumber(stored) + " CFE/t | Receiving " + formatNumber(produced) + " CFE/t"
+                "Quarry Controller (" + formatControllerState(externalEndpointCount) + "): Using "
+                    + formatNumber(stored) + " CFE/t | Receiving +" + formatNumber(produced) + " CFE/t | Stored: " + formatNumber(externalStored) + " CFE"
             );
             case PowerProbePackets.TYPE_STRATUS_PANEL -> Text.literal(
                 "Stratus Panel: +" + formatNumber(produced) + " CFE/t"

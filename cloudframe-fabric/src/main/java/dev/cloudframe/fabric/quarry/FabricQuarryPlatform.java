@@ -23,12 +23,15 @@ import dev.cloudframe.fabric.pipes.FabricPacketService;
 import dev.cloudframe.fabric.pipes.FabricItemStackAdapter;
 import dev.cloudframe.fabric.power.FabricPowerNetworkManager;
 import dev.cloudframe.fabric.content.CloudFrameContent;
+import dev.cloudframe.fabric.content.trash.TrashCanBlockEntity;
+import dev.cloudframe.fabric.quarry.controller.QuarryControllerBlockEntity;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -121,7 +124,45 @@ public class FabricQuarryPlatform implements QuarryPlatform {
 
     @Override
     public long extractPowerCfe(Object controllerLoc, long amount) {
-        return FabricPowerNetworkManager.extractPowerCfe(server, controllerLoc, amount);
+        if (amount <= 0L) return 0L;
+
+        long fromNetwork = FabricPowerNetworkManager.extractPowerCfe(server, controllerLoc, amount);
+        if (fromNetwork >= amount) {
+            // If the network can satisfy the quarry, allow the controller to store any leftover
+            // per-tick generation as buffer (surplus only; does not drain cells).
+            if (controllerLoc instanceof GlobalPos gp) {
+                ServerWorld w = server.getWorld(gp.dimension());
+                if (w != null) {
+                    BlockEntity be = w.getBlockEntity(gp.pos());
+                    if (be instanceof QuarryControllerBlockEntity qbe) {
+                        long cap = qbe.getPowerBufferCapacityCfe();
+                        long stored = qbe.getPowerBufferStoredCfe();
+                        long missing = Math.max(0L, cap - stored);
+                        if (missing > 0L) {
+                            long got = FabricPowerNetworkManager.extractGenerationOnlyCfe(server, controllerLoc, missing);
+                            if (got > 0L) {
+                                qbe.insertPowerToBuffer(got);
+                            }
+                        }
+                    }
+                }
+            }
+
+            return fromNetwork;
+        }
+
+        // If the network couldn't supply the full amount, fall back to the controller-local buffer.
+        if (!(controllerLoc instanceof GlobalPos gp)) return fromNetwork;
+        ServerWorld w = server.getWorld(gp.dimension());
+        if (w == null) return fromNetwork;
+        BlockEntity be = w.getBlockEntity(gp.pos());
+        if (!(be instanceof QuarryControllerBlockEntity qbe)) return fromNetwork;
+
+        long remaining = amount - Math.max(0L, fromNetwork);
+        if (remaining <= 0L) return fromNetwork;
+
+        long fromBuffer = qbe.extractPowerFromBuffer(remaining);
+        return fromNetwork + Math.max(0L, fromBuffer);
     }
 
     @Override
@@ -156,6 +197,23 @@ public class FabricQuarryPlatform implements QuarryPlatform {
 
         GlobalPos gp = GlobalPos.create(world.getRegistryKey(), pipePos.toImmutable());
         return instance.getPipeFilterManager().allows(gp, sideIndex, stack);
+    }
+
+    @Override
+    public boolean dropItemAtController(Object controllerLoc, Object itemStack) {
+        if (!(itemStack instanceof ItemStack stack)) return false;
+        if (stack.isEmpty() || stack.getCount() <= 0) return true;
+
+        BlockPos pos = posOf(controllerLoc);
+        if (pos == null) return false;
+        ServerWorld world = worldOf(null, controllerLoc);
+        if (world == null) return false;
+
+        Vec3d spawnPos = Vec3d.ofCenter(pos).add(0.0, 0.25, 0.0);
+        ItemEntity itemEntity = new ItemEntity(world, spawnPos.x, spawnPos.y, spawnPos.z, stack.copy());
+        itemEntity.setVelocity(Vec3d.ZERO);
+        world.spawnEntity(itemEntity);
+        return true;
     }
 
     private ServerWorld overworld() {
@@ -507,6 +565,9 @@ public class FabricQuarryPlatform implements QuarryPlatform {
 
     @Override
     public int addToInventory(Object inventoryHolder, Object itemStack) {
+        if (inventoryHolder instanceof TrashCanBlockEntity trash && itemStack instanceof ItemStack stack) {
+            return trash.accept(stack);
+        }
         if (!(inventoryHolder instanceof Inventory inv)) return 0;
         if (!(itemStack instanceof ItemStack stack)) return 0;
 
@@ -515,6 +576,10 @@ public class FabricQuarryPlatform implements QuarryPlatform {
 
     @Override
     public int totalRoomFor(Object inventoryHolder, Object itemStack) {
+        if (inventoryHolder instanceof TrashCanBlockEntity && itemStack instanceof ItemStack stack) {
+            // Always accept full stack; this is a sink.
+            return Math.max(0, stack.getCount());
+        }
         if (!(inventoryHolder instanceof Inventory inv)) return 0;
         if (!(itemStack instanceof ItemStack stack)) return 0;
 
@@ -523,6 +588,9 @@ public class FabricQuarryPlatform implements QuarryPlatform {
 
     @Override
     public int emptySlotCount(Object inventoryHolder) {
+        if (inventoryHolder instanceof TrashCanBlockEntity) {
+            return 1;
+        }
         if (!(inventoryHolder instanceof Inventory inv)) return 0;
         return InventoryCapacity.emptySlotCount(inv, INVENTORY, FabricItemStackAdapter.INSTANCE);
     }

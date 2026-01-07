@@ -30,6 +30,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.ItemScatterer;
 
 import dev.cloudframe.fabric.pipes.filter.PipeFilterScreenHandler;
+import dev.cloudframe.fabric.pipes.filter.PipeFilterItem;
 import dev.cloudframe.fabric.util.ClickSideUtil;
 
 import java.util.HashMap;
@@ -128,21 +129,18 @@ public class TubeBlock extends Block {
         int sideIndex = ClickSideUtil.toDirIndex(side);
         GlobalPos pipePos = GlobalPos.create(world.getRegistryKey(), pos.toImmutable());
 
+        // Never allow interacting with filter attachments on a side that is currently disconnected.
+        if (isSideDisabled(world, pos, side)) {
+            serverPlayer.sendMessage(Text.literal("§7That side is disconnected."), true);
+            return ActionResult.SUCCESS;
+        }
+
         boolean hasFilter = instance.getPipeFilterManager().hasFilter(pipePos, sideIndex);
 
         // Empty hand: open/remove existing filter.
         if (inHand == null || inHand.isEmpty()) {
             if (!hasFilter) {
                 return ActionResult.PASS;
-            }
-
-            if (serverPlayer.isSneaking()) {
-                instance.getPipeFilterManager().removeFilter(pipePos, sideIndex);
-                ItemStack drop = new ItemStack(CloudFrameContent.getPipeFilter(), 1);
-                ItemScatterer.spawn(world, pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5, drop);
-                serverPlayer.sendMessage(Text.literal("§7Removed pipe filter."), true);
-                refreshConnections(world, pos);
-                return ActionResult.SUCCESS;
             }
 
             serverPlayer.openHandledScreen(new NamedScreenHandlerFactory() {
@@ -159,7 +157,8 @@ public class TubeBlock extends Block {
             return ActionResult.SUCCESS;
         }
 
-        // Holding a pipe filter item: attach if needed, then open.
+        // Holding a pipe filter item:
+        // - Right-click: install only (no GUI)
         if (CloudFrameContent.getPipeFilter() != null && inHand.isOf(CloudFrameContent.getPipeFilter())) {
             // Only allow attaching to a real inventory connection.
             BlockPos neighbor = pos.offset(side);
@@ -171,25 +170,21 @@ public class TubeBlock extends Block {
 
             if (!hasFilter) {
                 instance.getPipeFilterManager().getOrCreate(pipePos, sideIndex);
+
+                // Apply configuration from the item being installed.
+                var cfg = PipeFilterItem.readItemConfig(inHand);
+                instance.getPipeFilterManager().setMode(pipePos, sideIndex, cfg.mode);
+                instance.getPipeFilterManager().setItems(pipePos, sideIndex, cfg.items);
+
                 if (!serverPlayer.isCreative()) {
                     inHand.decrement(1);
                 }
+                refreshConnections(world, pos);
+                serverPlayer.sendMessage(Text.literal("§7Pipe filter installed. Left click to remove. Shift-right-click anywhere with a filter item to configure."), true);
+                return ActionResult.SUCCESS;
             }
 
-            refreshConnections(world, pos);
-
-            serverPlayer.openHandledScreen(new NamedScreenHandlerFactory() {
-                @Override
-                public Text getDisplayName() {
-                    return Text.literal("Pipe Filter");
-                }
-
-                @Override
-                public net.minecraft.screen.ScreenHandler createMenu(int syncId, net.minecraft.entity.player.PlayerInventory inv, PlayerEntity p) {
-                    return new PipeFilterScreenHandler(syncId, inv, pipePos, sideIndex);
-                }
-            });
-
+            serverPlayer.sendMessage(Text.literal("§7Pipe filter already installed. Left click to remove. Shift-right-click anywhere with a filter item to configure."), true);
             return ActionResult.SUCCESS;
         }
 
@@ -247,12 +242,24 @@ public class TubeBlock extends Block {
             .with(WEST, shouldConnect(world, pos, Direction.WEST, pos.west(), westState))
             .with(UP, shouldConnect(world, pos, Direction.UP, pos.up(), upState))
             .with(DOWN, shouldConnect(world, pos, Direction.DOWN, pos.down(), downState))
-            .with(FILTER_NORTH, hasFilter(world, pos, Direction.NORTH))
-            .with(FILTER_SOUTH, hasFilter(world, pos, Direction.SOUTH))
-            .with(FILTER_EAST, hasFilter(world, pos, Direction.EAST))
-            .with(FILTER_WEST, hasFilter(world, pos, Direction.WEST))
-            .with(FILTER_UP, hasFilter(world, pos, Direction.UP))
-            .with(FILTER_DOWN, hasFilter(world, pos, Direction.DOWN));
+            .with(FILTER_NORTH, hasFilterOnConnectedInventory(world, pos, Direction.NORTH, pos.north(), northState))
+            .with(FILTER_SOUTH, hasFilterOnConnectedInventory(world, pos, Direction.SOUTH, pos.south(), southState))
+            .with(FILTER_EAST, hasFilterOnConnectedInventory(world, pos, Direction.EAST, pos.east(), eastState))
+            .with(FILTER_WEST, hasFilterOnConnectedInventory(world, pos, Direction.WEST, pos.west(), westState))
+            .with(FILTER_UP, hasFilterOnConnectedInventory(world, pos, Direction.UP, pos.up(), upState))
+            .with(FILTER_DOWN, hasFilterOnConnectedInventory(world, pos, Direction.DOWN, pos.down(), downState));
+    }
+
+    private static boolean hasFilterOnConnectedInventory(WorldAccess world, BlockPos pipePos, Direction side, BlockPos neighborPos, BlockState neighborState) {
+        if (world == null || pipePos == null || side == null) return false;
+
+        // Filters are only meaningful on enabled inventory connections.
+        if (isSideDisabled(world, pipePos, side)) return false;
+        if (neighborState == null || !neighborState.hasBlockEntity()) return false;
+        var be = world.getBlockEntity(neighborPos);
+        if (!(be instanceof Inventory)) return false;
+
+        return hasFilter(world, pipePos, side);
     }
 
     private static boolean hasFilter(WorldView world, BlockPos pipePos, Direction side) {
@@ -299,7 +306,7 @@ public class TubeBlock extends Block {
         return false;
     }
 
-    private static boolean isSideDisabled(WorldView world, BlockPos pipePos, Direction side) {
+    public static boolean isSideDisabled(WorldView world, BlockPos pipePos, Direction side) {
         if (!(world instanceof World w)) return false;
 
         CloudFrameFabric instance = CloudFrameFabric.instance();

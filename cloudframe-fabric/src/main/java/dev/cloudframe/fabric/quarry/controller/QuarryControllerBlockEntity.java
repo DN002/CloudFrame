@@ -1,12 +1,17 @@
 package dev.cloudframe.fabric.quarry.controller;
 
+import dev.cloudframe.common.quarry.Quarry;
+import dev.cloudframe.fabric.CloudFrameFabric;
+import dev.cloudframe.fabric.power.FabricPowerNetworkManager;
 import dev.cloudframe.fabric.content.CloudFrameContent;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.block.Block;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.NamedScreenHandlerFactory;
 import net.minecraft.storage.ReadView;
@@ -18,8 +23,17 @@ import net.minecraft.network.listener.ClientPlayPacketListener;
 import net.minecraft.network.packet.Packet;
 import net.minecraft.network.packet.s2c.play.BlockEntityUpdateS2CPacket;
 import net.minecraft.registry.RegistryWrapper;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.math.GlobalPos;
+import net.minecraft.world.World;
 
 public class QuarryControllerBlockEntity extends BlockEntity implements NamedScreenHandlerFactory {
+
+    // Matches common quarry energy model: 480 CFE per block at base speed.
+    private static final long ENERGY_PER_BLOCK_CFE = 480L;
+    private static final int BUFFER_SECONDS = 30;
+    private static final int TICKS_PER_SECOND = 20;
+    private static final int BUFFER_TICKS = BUFFER_SECONDS * TICKS_PER_SECOND;
 
     private boolean silkTouch = false;
     private int speedLevel = 0;
@@ -37,6 +51,10 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
     private String ownerName = null;
 
     private boolean outputRoundRobin = true;
+
+    // Controller-local power buffer (CFE). This acts as a short hold-up capacitor.
+    // It is charged from the connected power network while the quarry is paused.
+    private long powerBufferCfe = 0L;
 
     private final Inventory augmentInventory = new Inventory() {
         @Override
@@ -130,6 +148,138 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
 
     public QuarryControllerBlockEntity(BlockPos pos, BlockState state) {
         super(CloudFrameContent.getQuarryControllerBlockEntity(), pos, state);
+    }
+
+    private static long requiredCfePerTickForSpeed(int speedTier) {
+        int tpb = switch (speedTier) {
+            case 1 -> 8;
+            case 2 -> 6;
+            case 3 -> 5;
+            default -> 12;
+        };
+        if (tpb <= 0) tpb = 1;
+        return (ENERGY_PER_BLOCK_CFE + (long) tpb - 1L) / (long) tpb;
+    }
+
+    public long getPowerBufferCapacityCfe() {
+        long perTick = requiredCfePerTickForSpeed(speedLevel);
+        return Math.max(0L, perTick * (long) BUFFER_TICKS);
+    }
+
+    public long getPowerBufferStoredCfe() {
+        long cap = getPowerBufferCapacityCfe();
+        if (cap <= 0L) return 0L;
+        return Math.max(0L, Math.min(cap, powerBufferCfe));
+    }
+
+    /**
+     * Extract from the controller-local power buffer.
+     * Returns the actual amount extracted.
+     */
+    public long extractPowerFromBuffer(long amount) {
+        if (amount <= 0L) return 0L;
+        long cap = getPowerBufferCapacityCfe();
+        if (cap <= 0L) {
+            powerBufferCfe = 0L;
+            return 0L;
+        }
+
+        if (powerBufferCfe > cap) powerBufferCfe = cap;
+        long got = Math.min(amount, powerBufferCfe);
+        if (got <= 0L) return 0L;
+
+        powerBufferCfe -= got;
+        markDirty();
+        return got;
+    }
+
+    /**
+     * Insert into the controller-local buffer (clamped to capacity).
+     * Returns the actual amount inserted.
+     */
+    public long insertPowerToBuffer(long amount) {
+        if (amount <= 0L) return 0L;
+        long cap = getPowerBufferCapacityCfe();
+        if (cap <= 0L) {
+            powerBufferCfe = 0L;
+            return 0L;
+        }
+
+        if (powerBufferCfe < 0L) powerBufferCfe = 0L;
+        if (powerBufferCfe > cap) powerBufferCfe = cap;
+
+        long missing = cap - powerBufferCfe;
+        if (missing <= 0L) return 0L;
+
+        long put = Math.min(amount, missing);
+        if (put <= 0L) return 0L;
+
+        powerBufferCfe += put;
+        markDirty();
+        return put;
+    }
+
+    /**
+     * Server tick: charge buffer while paused if a power source exists; otherwise discharge toward 0.
+     */
+    public static void tick(World world, BlockPos pos, BlockState state, QuarryControllerBlockEntity be) {
+        if (world == null || be == null) return;
+        if (world.isClient()) return;
+        if (!(world instanceof ServerWorld sw)) return;
+
+        MinecraftServer server = sw.getServer();
+        if (server == null) return;
+
+        Object controllerLoc = GlobalPos.create(sw.getRegistryKey(), pos.toImmutable());
+
+        CloudFrameFabric inst = CloudFrameFabric.instance();
+        Quarry q = (inst != null && inst.getQuarryManager() != null)
+            ? inst.getQuarryManager().getByController(controllerLoc)
+            : null;
+        boolean active = q != null && q.isActive();
+
+        // While active, the quarry tick path consumes power via platform.extractPowerCfe (network first, then buffer).
+        // Avoid additionally charging/discharging here to keep behavior predictable.
+        if (active) return;
+
+        long cap = be.getPowerBufferCapacityCfe();
+        if (cap <= 0L) {
+            if (be.powerBufferCfe != 0L) {
+                be.powerBufferCfe = 0L;
+                be.markDirty();
+            }
+            return;
+        }
+        if (be.powerBufferCfe > cap) {
+            be.powerBufferCfe = cap;
+            be.markDirty();
+        }
+
+        FabricPowerNetworkManager.NetworkInfo info = FabricPowerNetworkManager.measureNetwork(server, controllerLoc);
+        boolean hasSource = info != null && (info.producedCfePerTick() > 0L || info.storedCfe() > 0L);
+
+        if (hasSource) {
+            long missing = cap - be.powerBufferCfe;
+            if (missing <= 0L) return;
+
+            // Charge at up to the theoretical per-tick requirement (so the buffer can fill in ~10s).
+            long perTick = requiredCfePerTickForSpeed(be.speedLevel);
+            long want = Math.min(missing, Math.max(0L, perTick));
+            if (want <= 0L) return;
+
+            long got = FabricPowerNetworkManager.extractPowerCfe(server, controllerLoc, want);
+            if (got > 0L) {
+                be.powerBufferCfe = Math.min(cap, be.powerBufferCfe + got);
+                be.markDirty();
+            }
+        } else {
+            // No power source detected: discharge to 0 over ~10 seconds.
+            long drainPerTick = Math.max(1L, cap / (long) BUFFER_TICKS);
+            if (be.powerBufferCfe > 0L) {
+                be.powerBufferCfe = Math.max(0L, be.powerBufferCfe - drainPerTick);
+                be.markDirty();
+            }
+        }
     }
 
     public Inventory getAugmentInventory() {
@@ -255,6 +405,8 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
         if (ownerName != null) {
             view.putString("OwnerName", ownerName);
         }
+
+        view.putLong("PowerBufferCfe", Math.max(0L, powerBufferCfe));
     }
 
     @Override
@@ -275,6 +427,12 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
         ownerLsl = view.getInt("OwnerLsl", 0);
 
         ownerName = view.getString("OwnerName", null);
+
+        powerBufferCfe = Math.max(0L, view.getLong("PowerBufferCfe", 0L));
+        long cap = getPowerBufferCapacityCfe();
+        if (cap > 0L && powerBufferCfe > cap) {
+            powerBufferCfe = cap;
+        }
     }
 
     public void onBroken() {

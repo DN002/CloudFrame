@@ -150,6 +150,36 @@ public final class FabricPowerNetworkManager {
     }
 
     /**
+     * Extract ONLY from the network's per-tick generation budget (no cells, no external storages).
+     *
+     * This is used for features like the quarry controller buffer: we only want to store "surplus"
+     * generation and avoid pulling from batteries/cells.
+     */
+    public static long extractGenerationOnlyCfe(MinecraftServer server, Object controllerLoc, long amount) {
+        if (amount <= 0L) return 0L;
+        if (!(controllerLoc instanceof GlobalPos controller)) return 0L;
+
+        ServerWorld world = server.getWorld(controller.dimension());
+        if (world == null) return 0L;
+
+        NetworkDiscovery discovery = discoverNetwork(world, controller.pos());
+        if (discovery == null) return 0L;
+
+        NetworkKey key = new NetworkKey(world.getRegistryKey(), discovery.rootCablePosLong);
+        NetworkSnapshot snap = snapshots.get(key);
+        if (snap == null || snap.tick != currentTick) {
+            snap = new NetworkSnapshot(currentTick, discovery.producedCfePerTick, discovery.cells, discovery.external);
+            snapshots.put(key, snap);
+        }
+
+        long take = Math.min(amount, snap.remainingGenerationCfe);
+        if (take <= 0L) return 0L;
+
+        snap.remainingGenerationCfe -= take;
+        return take;
+    }
+
+    /**
      * Read-only view of a cable network's current potential generation and stored energy.
      * This does NOT consume power. Intended for UI/status display.
      */

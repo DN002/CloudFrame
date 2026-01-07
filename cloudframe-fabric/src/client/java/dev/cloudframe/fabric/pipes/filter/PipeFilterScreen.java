@@ -14,7 +14,6 @@ public class PipeFilterScreen extends HandledScreen<PipeFilterScreenHandler> {
     private static final Identifier GENERIC_54 = Identifier.of("minecraft", "textures/gui/container/generic_54.png");
 
     private ButtonWidget modeButton;
-    private ButtonWidget removeButton;
 
     public PipeFilterScreen(PipeFilterScreenHandler handler, PlayerInventory inventory, Text title) {
         super(handler, inventory, title);
@@ -30,10 +29,11 @@ public class PipeFilterScreen extends HandledScreen<PipeFilterScreenHandler> {
         int x0 = this.x;
         int y0 = this.y;
 
-        int buttonW = 78;
-        int buttonH = 20;
+        // Keep the toggle in the title/header area without overlapping the first row of slots (starts at y+18).
+        int buttonW = 86;
+        int buttonH = 14;
         int bx = x0 + this.backgroundWidth - 8 - buttonW;
-        int by = y0 + 4;
+        int by = y0 + 2;
 
         modeButton = ButtonWidget.builder(Text.literal(""), button -> {
             if (client != null && client.interactionManager != null) {
@@ -42,17 +42,6 @@ public class PipeFilterScreen extends HandledScreen<PipeFilterScreenHandler> {
         }).dimensions(bx, by, buttonW, buttonH).build();
 
         addDrawableChild(modeButton);
-
-        int removeW = 62;
-        int removeH = 20;
-        int rx = x0 + 8;
-        int ry = y0 + 4;
-        removeButton = ButtonWidget.builder(Text.literal("Remove"), button -> {
-            if (client != null && client.interactionManager != null) {
-                client.interactionManager.clickButton(handler.syncId, 1);
-            }
-        }).dimensions(rx, ry, removeW, removeH).build();
-        addDrawableChild(removeButton);
 
         updateModeButtonText();
     }
@@ -79,19 +68,20 @@ public class PipeFilterScreen extends HandledScreen<PipeFilterScreenHandler> {
         context.drawTexture(RenderPipelines.GUI_TEXTURED, GENERIC_54, x0, y0, 0, 0, this.backgroundWidth, PipeFilterScreenHandler.UI_ROWS * 18 + 17, 256, 256);
         // Player inventory region.
         context.drawTexture(RenderPipelines.GUI_TEXTURED, GENERIC_54, x0, y0 + PipeFilterScreenHandler.UI_ROWS * 18 + 17, 0, 126, this.backgroundWidth, 96, 256, 256);
+
+        // Title (draw here to avoid any potential foreground clipping)
+        context.drawText(this.textRenderer, Text.literal("Pipe Filter"), x0 + 8, y0 + 6, 0x404040, false);
     }
 
     @Override
     protected void drawForeground(DrawContext context, int mouseX, int mouseY) {
-        // Title
-        context.drawText(this.textRenderer, this.title, 8, 6, 0x404040, false);
         // Player inventory
         context.drawText(this.textRenderer, this.playerInventoryTitle, 8, this.playerInventoryTitleY, 0x404040, false);
 
         // Hint under title (simple text, no new icons)
         Text hint = Text.literal(handler.isWhitelist()
-            ? "Only listed items may enter"
-            : "Listed items are blocked");
+            ? "Allows only listed items (empty = allow all)"
+            : "Blocks listed items (empty = allow all)");
         context.drawText(this.textRenderer, hint, 8, 18 + PipeFilterScreenHandler.UI_ROWS * 18 + 2, 0x404040, false);
     }
 }

@@ -59,6 +59,8 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
     // 22 powerBlocked (0/1)
     // 23 powerRequiredCfePerTick (int, clamped)
     // 24 powerReceivedCfePerTick (int, clamped)
+    // 28 powerBufferStoredCfe (int, clamped)
+    // 29 powerBufferCapacityCfe (int, clamped)
     // 25 controllerX
     // 26 controllerY
     // 27 controllerZ
@@ -73,7 +75,7 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
         this.controllerPos = BlockPos.ORIGIN;
         this.be = null;
         this.augmentInventory = new SimpleInventory(AUGMENT_SLOTS);
-        this.properties = new ArrayPropertyDelegate(28);
+        this.properties = new ArrayPropertyDelegate(30);
         addProperties(this.properties);
 
         addAugmentSlots();
@@ -213,6 +215,16 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
 
                         yield v > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) Math.max(0L, v);
                     }
+                    case 28 -> {
+                        if (be == null) yield 0;
+                        long v = Math.max(0L, be.getPowerBufferStoredCfe());
+                        yield v > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) v;
+                    }
+                    case 29 -> {
+                        if (be == null) yield 0;
+                        long v = Math.max(0L, be.getPowerBufferCapacityCfe());
+                        yield v > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) v;
+                    }
                     case 25 -> controllerPos.getX();
                     case 26 -> controllerPos.getY();
                     case 27 -> controllerPos.getZ();
@@ -231,7 +243,7 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
 
             @Override
             public int size() {
-                return 28;
+                return 30;
             }
         };
         addProperties(this.properties);
@@ -367,6 +379,14 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
 
     public int getPowerReceivedCfePerTick() {
         return properties.get(24);
+    }
+
+    public int getPowerBufferStoredCfe() {
+        return properties.get(28);
+    }
+
+    public int getPowerBufferCapacityCfe() {
+        return properties.get(29);
     }
 
     public java.util.UUID getOwnerUuid() {

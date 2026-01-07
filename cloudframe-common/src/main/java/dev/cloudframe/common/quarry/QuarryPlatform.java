@@ -159,6 +159,16 @@ public interface QuarryPlatform {
     }
 
     /**
+     * Fallback behavior when output routing cannot find any destination inventory that can accept an item.
+     *
+     * <p>If implemented, the platform should spawn/drop the item stack at (or near) the controller location,
+     * and return true if the item was successfully dropped/consumed.</p>
+     */
+    default boolean dropItemAtController(Object controllerLoc, Object itemStack) {
+        return false;
+    }
+
+    /**
      * Power system hooks (CFE).
      *
      * Default is disabled to preserve legacy behavior on platforms that don't implement power.

@@ -7,7 +7,11 @@ import dev.cloudframe.fabric.power.EnergyInterop;
 import dev.cloudframe.fabric.quarry.controller.QuarryControllerBlockEntity;
 import dev.cloudframe.fabric.quarry.controller.QuarryControllerBlock;
 import dev.cloudframe.fabric.quarry.controller.QuarryControllerScreenHandler;
+import dev.cloudframe.fabric.pipes.filter.PipeFilterItem;
 import dev.cloudframe.fabric.pipes.filter.PipeFilterScreenHandler;
+import dev.cloudframe.fabric.content.trash.TrashCanBlock;
+import dev.cloudframe.fabric.content.trash.TrashCanBlockEntity;
+import dev.cloudframe.fabric.content.trash.TrashCanScreenHandler;
 import net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityTypeBuilder;
 import net.minecraft.block.Block;
 import net.minecraft.block.AbstractBlock;
@@ -37,6 +41,7 @@ public final class CloudFrameContent {
     public static final Identifier MARKER_ID = Identifier.of(CloudFrameFabric.MOD_ID, "marker");
     public static final Identifier WRENCH_ID = Identifier.of(CloudFrameFabric.MOD_ID, "wrench");
     public static final Identifier PIPE_FILTER_ID = Identifier.of(CloudFrameFabric.MOD_ID, "pipe_filter");
+    public static final Identifier TRASH_CAN_ID = Identifier.of(CloudFrameFabric.MOD_ID, "trash_can");
     public static final Identifier SILK_TOUCH_AUGMENT_ID = Identifier.of(CloudFrameFabric.MOD_ID, "silk_touch_augment");
     public static final Identifier SPEED_AUGMENT_1_ID = Identifier.of(CloudFrameFabric.MOD_ID, "speed_augment_1");
     public static final Identifier SPEED_AUGMENT_2_ID = Identifier.of(CloudFrameFabric.MOD_ID, "speed_augment_2");
@@ -49,6 +54,7 @@ public final class CloudFrameContent {
     public static Block CLOUD_CELL_BLOCK;
     public static Block QUARRY_CONTROLLER_BLOCK;
     public static Block MARKER_BLOCK;
+    public static Block TRASH_CAN_BLOCK;
 
     public static Item TUBE;
     public static Item CLOUD_CABLE;
@@ -59,6 +65,7 @@ public final class CloudFrameContent {
     public static Item MARKER;
     public static Item WRENCH;
     public static Item PIPE_FILTER;
+    public static Item TRASH_CAN;
     public static Item SILK_TOUCH_AUGMENT;
     public static Item SPEED_AUGMENT_1;
     public static Item SPEED_AUGMENT_2;
@@ -67,8 +74,10 @@ public final class CloudFrameContent {
     // Block entity types and screen handlers
     private static BlockEntityType<QuarryControllerBlockEntity> quarryControllerBE;
     private static BlockEntityType<CloudCellBlockEntity> cloudCellBE;
+    private static BlockEntityType<TrashCanBlockEntity> trashCanBE;
     private static ScreenHandlerType<QuarryControllerScreenHandler> quarryControllerScreenHandler;
     private static ScreenHandlerType<PipeFilterScreenHandler> pipeFilterScreenHandler;
+    private static ScreenHandlerType<TrashCanScreenHandler> trashCanScreenHandler;
 
     public static Block getQuarryControllerBlock() {
         return QUARRY_CONTROLLER_BLOCK;
@@ -135,6 +144,14 @@ public final class CloudFrameContent {
         return pipeFilterScreenHandler;
     }
 
+    public static BlockEntityType<TrashCanBlockEntity> getTrashCanBlockEntity() {
+        return trashCanBE;
+    }
+
+    public static ScreenHandlerType<TrashCanScreenHandler> getTrashCanScreenHandler() {
+        return trashCanScreenHandler;
+    }
+
     private static RegistryKey<Item> itemKey(Identifier id) {
         return RegistryKey.of(RegistryKeys.ITEM, id);
     }
@@ -150,6 +167,8 @@ public final class CloudFrameContent {
             TUBE_ID,
             new TubeBlock(
                 AbstractBlock.Settings.copy(Blocks.GLASS)
+                    // Glass breaks instantly; require holding left-click to break.
+                    .strength(2.0f, 6.0f)
                     .registryKey(blockKey(TUBE_ID))
             )
         );
@@ -159,6 +178,8 @@ public final class CloudFrameContent {
             CLOUD_CABLE_ID,
             new CloudCableBlock(
                 AbstractBlock.Settings.copy(Blocks.GLASS)
+                    // Glass breaks instantly; require holding left-click to break.
+                    .strength(2.0f, 6.0f)
                     .registryKey(blockKey(CLOUD_CABLE_ID))
             )
         );
@@ -209,6 +230,15 @@ public final class CloudFrameContent {
             )
         );
 
+        TRASH_CAN_BLOCK = Registry.register(
+            Registries.BLOCK,
+            TRASH_CAN_ID,
+            new TrashCanBlock(
+                AbstractBlock.Settings.copy(Blocks.IRON_BLOCK)
+                    .registryKey(blockKey(TRASH_CAN_ID))
+            )
+        );
+
         // Items
         TUBE = Registry.register(
             Registries.ITEM,
@@ -252,6 +282,12 @@ public final class CloudFrameContent {
             new BlockItem(MARKER_BLOCK, new Item.Settings().registryKey(itemKey(MARKER_ID)))
         );
 
+        TRASH_CAN = Registry.register(
+            Registries.ITEM,
+            TRASH_CAN_ID,
+            new BlockItem(TRASH_CAN_BLOCK, new Item.Settings().registryKey(itemKey(TRASH_CAN_ID)))
+        );
+
         WRENCH = Registry.register(
             Registries.ITEM,
             WRENCH_ID,
@@ -261,7 +297,7 @@ public final class CloudFrameContent {
         PIPE_FILTER = Registry.register(
             Registries.ITEM,
             PIPE_FILTER_ID,
-            new Item(new Item.Settings().registryKey(itemKey(PIPE_FILTER_ID)))
+            new PipeFilterItem(new Item.Settings().registryKey(itemKey(PIPE_FILTER_ID)))
         );
 
         SILK_TOUCH_AUGMENT = Registry.register(
@@ -301,6 +337,12 @@ public final class CloudFrameContent {
             FabricBlockEntityTypeBuilder.create(CloudCellBlockEntity::new, CLOUD_CELL_BLOCK).build()
         );
 
+        trashCanBE = Registry.register(
+            Registries.BLOCK_ENTITY_TYPE,
+            Identifier.of(CloudFrameFabric.MOD_ID, "trash_can"),
+            FabricBlockEntityTypeBuilder.create(TrashCanBlockEntity::new, TRASH_CAN_BLOCK).build()
+        );
+
         // Optional: expose Cloud Cells to external energy mods (soft dependency via reflection).
         EnergyInterop.tryRegisterCloudCell(cloudCellBE);
 
@@ -314,6 +356,12 @@ public final class CloudFrameContent {
             Registries.SCREEN_HANDLER,
             Identifier.of(CloudFrameFabric.MOD_ID, "pipe_filter"),
             new ScreenHandlerType<>(PipeFilterScreenHandler::new, FeatureFlags.VANILLA_FEATURES)
+        );
+
+        trashCanScreenHandler = Registry.register(
+            Registries.SCREEN_HANDLER,
+            Identifier.of(CloudFrameFabric.MOD_ID, "trash_can"),
+            new ScreenHandlerType<>(TrashCanScreenHandler::new, FeatureFlags.VANILLA_FEATURES)
         );
 
         // Startup sanity: log what actually got registered.

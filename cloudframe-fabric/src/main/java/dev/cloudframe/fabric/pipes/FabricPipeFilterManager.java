@@ -111,14 +111,16 @@ public final class FabricPipeFilterManager {
             boolean emptyList = isEmptyFilterList();
             boolean matched = containsItem(stack.getItem());
 
+            // Policy: empty list = no filtering (allow everything), regardless of mode.
+            if (emptyList) return true;
+
             if (mode == MODE_BLACKLIST) {
-                // Empty blacklist -> allow everything.
-                return emptyList || !matched;
+                // Blacklist: block only listed items.
+                return !matched;
             }
 
-            // Whitelist:
-            // Empty whitelist -> allow nothing.
-            return !emptyList && matched;
+            // Whitelist: allow only listed items.
+            return matched;
         }
     }
 

@@ -53,6 +53,12 @@ public class FabricWrenchMarkerActivationListener {
                 return ActionResult.PASS;
             }
 
+            // Only activate frames when the player explicitly clicks a marker.
+            // This prevents chat spam when the player right-clicks the ground with a wrench.
+            if (clickedState.getBlock() != CloudFrameContent.MARKER_BLOCK) {
+                return ActionResult.PASS;
+            }
+
             // Let the wrench's pipe-connection toggle logic handle tube blocks.
             if (CloudFrameContent.getTubeBlock() != null && clickedState.isOf(CloudFrameContent.getTubeBlock())) {
                 return ActionResult.PASS;

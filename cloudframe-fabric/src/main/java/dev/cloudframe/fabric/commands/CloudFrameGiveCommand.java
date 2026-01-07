@@ -44,13 +44,12 @@ public final class CloudFrameGiveCommand {
         items.put("filter", CloudFrameContent.getPipeFilter());
         items.put("cable", CloudFrameContent.CLOUD_CABLE);
         items.put("cloud_cable", CloudFrameContent.CLOUD_CABLE);
-        items.put("stratus", CloudFrameContent.STRATUS_PANEL);
         items.put("stratus_panel", CloudFrameContent.STRATUS_PANEL);
-
-        items.put("turbine", CloudFrameContent.CLOUD_TURBINE);
         items.put("cloud_turbine", CloudFrameContent.CLOUD_TURBINE);
         items.put("cell", CloudFrameContent.CLOUD_CELL);
         items.put("cloud_cell", CloudFrameContent.CLOUD_CELL);
+
+        items.put("trash_can", CloudFrameContent.TRASH_CAN);
 
         items.put("controller", CloudFrameContent.QUARRY_CONTROLLER);
         items.put("quarry_controller", CloudFrameContent.QUARRY_CONTROLLER);

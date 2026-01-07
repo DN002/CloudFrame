@@ -16,10 +16,14 @@ import net.minecraft.storage.WriteView;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.collection.DefaultedList;
 
 public class TrashCanBlockEntity extends BlockEntity implements Inventory, NamedScreenHandlerFactory {
 
-    private ItemStack preview = ItemStack.EMPTY;
+    private static final int SLOT_COUNT = 9;
+
+    // Preview-only history. These are not real stored items.
+    private final DefaultedList<ItemStack> previewSlots = DefaultedList.ofSize(SLOT_COUNT, ItemStack.EMPTY);
 
     public TrashCanBlockEntity(BlockPos pos, BlockState state) {
         super(CloudFrameContent.getTrashCanBlockEntity(), pos, state);
@@ -33,8 +37,42 @@ public class TrashCanBlockEntity extends BlockEntity implements Inventory, Named
     public int accept(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return 0;
 
-        // Replace the preview with the latest incoming item.
-        this.preview = stack.copy();
+        // Shift history to the right; far-right is forgotten (already deleted).
+        for (int i = SLOT_COUNT - 1; i >= 1; i--) {
+            previewSlots.set(i, previewSlots.get(i - 1));
+        }
+
+        // Insert newest on the left.
+        ItemStack incoming = stack.copy();
+        int max = Math.max(1, incoming.getMaxCount());
+        if (incoming.getCount() > max) {
+            incoming.setCount(max);
+        }
+        previewSlots.set(0, incoming);
+
+        // Merge adjacent identical stacks left-to-right (keep newest on the left).
+        for (int i = 0; i < SLOT_COUNT - 1; i++) {
+            ItemStack left = previewSlots.get(i);
+            if (left == null || left.isEmpty()) continue;
+
+            ItemStack right = previewSlots.get(i + 1);
+            if (right == null || right.isEmpty()) continue;
+
+            if (!ItemStack.areItemsAndComponentsEqual(left, right)) continue;
+
+            int space = left.getMaxCount() - left.getCount();
+            if (space <= 0) continue;
+
+            int move = Math.min(space, right.getCount());
+            if (move <= 0) continue;
+
+            left.increment(move);
+            right.decrement(move);
+            if (right.isEmpty()) {
+                previewSlots.set(i + 1, ItemStack.EMPTY);
+            }
+        }
+
         markDirty();
         if (world != null && !world.isClient()) {
             world.updateListeners(pos, getCachedState(), getCachedState(), 3);
@@ -43,21 +81,27 @@ public class TrashCanBlockEntity extends BlockEntity implements Inventory, Named
         return stack.getCount();
     }
 
-    // Inventory (1-slot, read-only for players; insertion is via pipes/quarry)
+    // Inventory (9-slot, read-only for players; insertion is via pipes/quarry)
 
     @Override
     public int size() {
-        return 1;
+        return SLOT_COUNT;
     }
 
     @Override
     public boolean isEmpty() {
-        return preview.isEmpty();
+        for (int i = 0; i < SLOT_COUNT; i++) {
+            ItemStack s = previewSlots.get(i);
+            if (s != null && !s.isEmpty()) return false;
+        }
+        return true;
     }
 
     @Override
     public ItemStack getStack(int slot) {
-        return slot == 0 ? preview : ItemStack.EMPTY;
+        if (slot < 0 || slot >= SLOT_COUNT) return ItemStack.EMPTY;
+        ItemStack s = previewSlots.get(slot);
+        return s == null ? ItemStack.EMPTY : s;
     }
 
     @Override
@@ -93,13 +137,15 @@ public class TrashCanBlockEntity extends BlockEntity implements Inventory, Named
 
     @Override
     public void clear() {
-        preview = ItemStack.EMPTY;
+        for (int i = 0; i < SLOT_COUNT; i++) {
+            previewSlots.set(i, ItemStack.EMPTY);
+        }
         markDirty();
     }
 
     @Override
     public Text getDisplayName() {
-        return Text.literal("Trash Can");
+        return Text.translatable("block.cloudframe.trash_can");
     }
 
     @Override
@@ -110,16 +156,26 @@ public class TrashCanBlockEntity extends BlockEntity implements Inventory, Named
     @Override
     protected void writeData(WriteView view) {
         super.writeData(view);
-        if (preview != null && !preview.isEmpty()) {
-            // Persist a simple preview (item id + count). This is the only thing the UI needs.
+
+        // Persist preview history as simple (item id + count) pairs per slot.
+        for (int i = 0; i < SLOT_COUNT; i++) {
+            ItemStack s = previewSlots.get(i);
+            String keyItem = "S" + i + "Item";
+            String keyCount = "S" + i + "Count";
+
+            if (s == null || s.isEmpty()) {
+                view.putString(keyItem, "");
+                view.putInt(keyCount, 0);
+                continue;
+            }
+
             try {
-                var id = Registries.ITEM.getId(preview.getItem());
-                if (id != null) {
-                    view.putString("PreviewItem", id.toString());
-                    view.putInt("PreviewCount", Math.max(1, preview.getCount()));
-                }
+                var id = Registries.ITEM.getId(s.getItem());
+                view.putString(keyItem, id == null ? "" : id.toString());
+                view.putInt(keyCount, Math.max(1, s.getCount()));
             } catch (Throwable ignored) {
-                // Best-effort persistence; safe to ignore if something goes wrong.
+                view.putString(keyItem, "");
+                view.putInt(keyCount, 0);
             }
         }
     }
@@ -127,30 +183,29 @@ public class TrashCanBlockEntity extends BlockEntity implements Inventory, Named
     @Override
     protected void readData(ReadView view) {
         super.readData(view);
-        String idStr = view.getString("PreviewItem", null);
-        int count = Math.max(0, view.getInt("PreviewCount", 0));
 
-        if (idStr == null || idStr.isBlank() || count <= 0) {
-            preview = ItemStack.EMPTY;
-            return;
-        }
+        for (int i = 0; i < SLOT_COUNT; i++) {
+            String idStr = view.getString("S" + i + "Item", "");
+            int count = Math.max(0, view.getInt("S" + i + "Count", 0));
 
-        try {
-            Identifier id = Identifier.of(idStr);
-            var item = Registries.ITEM.get(id);
-            if (item == null || item == Items.AIR) {
-                preview = ItemStack.EMPTY;
-                return;
+            if (idStr == null || idStr.isBlank() || count <= 0) {
+                previewSlots.set(i, ItemStack.EMPTY);
+                continue;
             }
 
-            ItemStack stack = new ItemStack(item, Math.min(count, item.getMaxCount()));
-            if (stack.isEmpty()) {
-                preview = ItemStack.EMPTY;
-            } else {
-                preview = stack;
+            try {
+                Identifier id = Identifier.of(idStr);
+                var item = Registries.ITEM.get(id);
+                if (item == null || item == Items.AIR) {
+                    previewSlots.set(i, ItemStack.EMPTY);
+                    continue;
+                }
+
+                ItemStack s = new ItemStack(item, Math.min(count, item.getMaxCount()));
+                previewSlots.set(i, s.isEmpty() ? ItemStack.EMPTY : s);
+            } catch (Throwable ignored) {
+                previewSlots.set(i, ItemStack.EMPTY);
             }
-        } catch (Throwable ignored) {
-            preview = ItemStack.EMPTY;
         }
     }
 }

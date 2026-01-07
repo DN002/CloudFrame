@@ -68,20 +68,20 @@ public class PipeFilterScreen extends HandledScreen<PipeFilterScreenHandler> {
         context.drawTexture(RenderPipelines.GUI_TEXTURED, GENERIC_54, x0, y0, 0, 0, this.backgroundWidth, PipeFilterScreenHandler.UI_ROWS * 18 + 17, 256, 256);
         // Player inventory region.
         context.drawTexture(RenderPipelines.GUI_TEXTURED, GENERIC_54, x0, y0 + PipeFilterScreenHandler.UI_ROWS * 18 + 17, 0, 126, this.backgroundWidth, 96, 256, 256);
-
-        // Title (draw here to avoid any potential foreground clipping)
-        context.drawText(this.textRenderer, Text.literal("Pipe Filter"), x0 + 8, y0 + 6, 0x404040, false);
     }
 
     @Override
     protected void drawForeground(DrawContext context, int mouseX, int mouseY) {
-        // Player inventory
-        context.drawText(this.textRenderer, this.playerInventoryTitle, 8, this.playerInventoryTitleY, 0x404040, false);
+        // Title
+        context.drawText(this.textRenderer, this.title, 8, 6, 0x404040, false);
 
-        // Hint under title (simple text, no new icons)
+        // Hint under title (keep within header area, above first row of slots)
         Text hint = Text.literal(handler.isWhitelist()
             ? "Allows only listed items (empty = allow all)"
             : "Blocks listed items (empty = allow all)");
-        context.drawText(this.textRenderer, hint, 8, 18 + PipeFilterScreenHandler.UI_ROWS * 18 + 2, 0x404040, false);
+        context.drawText(this.textRenderer, hint, 8, 16, 0x404040, false);
+
+        // Player inventory
+        context.drawText(this.textRenderer, this.playerInventoryTitle, 8, this.playerInventoryTitleY, 0x404040, false);
     }
 }

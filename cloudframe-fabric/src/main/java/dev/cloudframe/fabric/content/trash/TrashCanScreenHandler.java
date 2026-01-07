@@ -10,14 +10,16 @@ import net.minecraft.screen.slot.Slot;
 
 public class TrashCanScreenHandler extends ScreenHandler {
 
+    private static final int SLOT_COUNT = 9;
+
     private final Inventory trashInventory;
 
     // Client ctor
     public TrashCanScreenHandler(int syncId, PlayerInventory playerInventory) {
         super(CloudFrameContent.getTrashCanScreenHandler(), syncId);
-        this.trashInventory = new net.minecraft.inventory.SimpleInventory(1);
+        this.trashInventory = new net.minecraft.inventory.SimpleInventory(SLOT_COUNT);
 
-        addTrashSlot();
+        addTrashSlots();
         addPlayerSlots(playerInventory);
     }
 
@@ -26,26 +28,27 @@ public class TrashCanScreenHandler extends ScreenHandler {
         super(CloudFrameContent.getTrashCanScreenHandler(), syncId);
         this.trashInventory = trashInventory;
 
-        addTrashSlot();
+        addTrashSlots();
         addPlayerSlots(playerInventory);
     }
 
-    private void addTrashSlot() {
-        // Centered-ish in a generic container background.
-        int x = 80;
-        int y = 20;
+    private void addTrashSlots() {
+        // Matches the vanilla generic_54 background for 1 row.
+        int y = 18;
+        for (int col = 0; col < SLOT_COUNT; col++) {
+            int x = 8 + col * 18;
+            this.addSlot(new Slot(trashInventory, col, x, y) {
+                @Override
+                public boolean canInsert(ItemStack stack) {
+                    return false;
+                }
 
-        this.addSlot(new Slot(trashInventory, 0, x, y) {
-            @Override
-            public boolean canInsert(ItemStack stack) {
-                return false;
-            }
-
-            @Override
-            public boolean canTakeItems(PlayerEntity playerEntity) {
-                return false;
-            }
-        });
+                @Override
+                public boolean canTakeItems(PlayerEntity playerEntity) {
+                    return false;
+                }
+            });
+        }
     }
 
     private void addPlayerSlots(PlayerInventory playerInventory) {

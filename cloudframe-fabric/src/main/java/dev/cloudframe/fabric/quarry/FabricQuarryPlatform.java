@@ -19,6 +19,7 @@ import dev.cloudframe.common.platform.world.WorldKeyAdapter;
 import dev.cloudframe.common.util.Debug;
 import dev.cloudframe.common.util.DebugManager;
 import dev.cloudframe.fabric.CloudFrameFabric;
+import dev.cloudframe.fabric.content.TubeBlock;
 import dev.cloudframe.fabric.pipes.FabricPacketService;
 import dev.cloudframe.fabric.pipes.FabricItemStackAdapter;
 import dev.cloudframe.fabric.power.FabricPowerNetworkManager;
@@ -45,6 +46,7 @@ import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.GlobalPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.loot.context.LootWorldContext;
@@ -167,15 +169,90 @@ public class FabricQuarryPlatform implements QuarryPlatform {
 
     @Override
     public boolean hasValidOutput(Object controllerLoc) {
-        if (controllerLoc == null || pipeManager == null) return false;
+        if (controllerLoc == null) return false;
 
-        return pipeManager.hasValidOutputFrom(controllerLoc, (loc) -> {
-            ServerWorld world = worldOf(null, loc);
-            BlockPos pos = posOf(loc);
-            if (world == null || pos == null) return false;
-            if (CloudFrameContent.getTubeBlock() == null) return false;
-            return world.getBlockState(pos).isOf(CloudFrameContent.getTubeBlock());
-        }, 8192);
+        // Fast path: direct adjacent inventory.
+        for (Direction dir : Direction.values()) {
+            Object adj = offset(controllerLoc, dir.getOffsetX(), dir.getOffsetY(), dir.getOffsetZ());
+            if (adj == null) continue;
+            if (isInventory(adj)) return true;
+        }
+
+        // Pipe path: scan the actual in-world tube connectivity so disconnected sides
+        // (via wrench toggles) cannot be reported as valid output.
+        if (!(controllerLoc instanceof GlobalPos gp)) return false;
+        ServerWorld world = server.getWorld(gp.dimension());
+        if (world == null) return false;
+
+        if (CloudFrameContent.getTubeBlock() == null) return false;
+        if (CloudFrameContent.getQuarryControllerBlock() == null) return false;
+
+        final int limit = 8192;
+        java.util.ArrayDeque<BlockPos> queue = new java.util.ArrayDeque<>();
+        java.util.HashSet<BlockPos> visited = new java.util.HashSet<>();
+
+        BlockPos controllerPos = gp.pos();
+
+        // Seed BFS with tube blocks that are actually connected to the controller.
+        for (Direction dir : Direction.values()) {
+            BlockPos tubePos = controllerPos.offset(dir);
+            if (!world.isChunkLoaded(tubePos.getX() >> 4, tubePos.getZ() >> 4)) continue;
+
+            BlockState tubeState = world.getBlockState(tubePos);
+            if (!tubeState.isOf(CloudFrameContent.getTubeBlock())) continue;
+
+            // The tube must expose an arm facing back to the controller.
+            if (!tubeConnects(tubeState, dir.getOpposite())) continue;
+
+            queue.add(tubePos.toImmutable());
+        }
+
+        while (!queue.isEmpty() && visited.size() < limit) {
+            BlockPos tubePos = queue.pollFirst();
+            if (tubePos == null) continue;
+            tubePos = tubePos.toImmutable();
+            if (!visited.add(tubePos)) continue;
+
+            if (!world.isChunkLoaded(tubePos.getX() >> 4, tubePos.getZ() >> 4)) continue;
+            BlockState tubeState = world.getBlockState(tubePos);
+            if (!tubeState.isOf(CloudFrameContent.getTubeBlock())) continue;
+
+            for (Direction dir : Direction.values()) {
+                if (!tubeConnects(tubeState, dir)) continue;
+
+                BlockPos neighborPos = tubePos.offset(dir);
+                if (!world.isChunkLoaded(neighborPos.getX() >> 4, neighborPos.getZ() >> 4)) continue;
+
+                BlockState neighborState = world.getBlockState(neighborPos);
+                if (neighborState.isOf(CloudFrameContent.getTubeBlock())) {
+                    // Require the neighbor tube to connect back.
+                    if (tubeConnects(neighborState, dir.getOpposite())) {
+                        queue.add(neighborPos.toImmutable());
+                    }
+                    continue;
+                }
+
+                // Any reachable inventory means output is valid.
+                BlockEntity be = world.getBlockEntity(neighborPos);
+                if (be instanceof Inventory) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static boolean tubeConnects(BlockState tubeState, Direction dir) {
+        if (tubeState == null || dir == null) return false;
+        return switch (dir) {
+            case NORTH -> tubeState.get(TubeBlock.NORTH);
+            case SOUTH -> tubeState.get(TubeBlock.SOUTH);
+            case EAST -> tubeState.get(TubeBlock.EAST);
+            case WEST -> tubeState.get(TubeBlock.WEST);
+            case UP -> tubeState.get(TubeBlock.UP);
+            case DOWN -> tubeState.get(TubeBlock.DOWN);
+        };
     }
 
     @Override

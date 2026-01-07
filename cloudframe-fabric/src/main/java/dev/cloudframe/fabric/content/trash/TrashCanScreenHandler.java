@@ -37,15 +37,18 @@ public class TrashCanScreenHandler extends ScreenHandler {
         int y = 18;
         for (int col = 0; col < SLOT_COUNT; col++) {
             int x = 8 + col * 18;
+            final int slotIndex = col;
             this.addSlot(new Slot(trashInventory, col, x, y) {
                 @Override
                 public boolean canInsert(ItemStack stack) {
-                    return false;
+                    // Only slot 0 (leftmost) accepts insertions for trashing
+                    return slotIndex == 0;
                 }
 
                 @Override
                 public boolean canTakeItems(PlayerEntity playerEntity) {
-                    return false;
+                    // Players can take items from any slot to rescue them
+                    return true;
                 }
             });
         }
@@ -69,8 +72,39 @@ public class TrashCanScreenHandler extends ScreenHandler {
 
     @Override
     public ItemStack quickMove(PlayerEntity player, int slotIndex) {
-        // No special shift-click behavior needed; nothing can move into/out of the trash slot.
-        return ItemStack.EMPTY;
+        Slot slot = this.slots.get(slotIndex);
+        if (slot == null || !slot.hasStack()) {
+            return ItemStack.EMPTY;
+        }
+
+        ItemStack originalStack = slot.getStack();
+        ItemStack stackCopy = originalStack.copy();
+
+        // If shift-clicking from player inventory, try to trash the item (insert into slot 0)
+        if (slotIndex >= SLOT_COUNT) {
+            // This is a player inventory slot
+            Slot trashSlot = this.slots.get(0);
+            if (trashSlot.canInsert(originalStack)) {
+                // Trash the item by inserting into slot 0
+                trashInventory.setStack(0, originalStack.copy());
+                slot.setStack(ItemStack.EMPTY);
+                return stackCopy;
+            }
+        }
+        // If shift-clicking from trash slots, try to move to player inventory
+        else if (slotIndex < SLOT_COUNT) {
+            if (!this.insertItem(originalStack, SLOT_COUNT, this.slots.size(), true)) {
+                return ItemStack.EMPTY;
+            }
+            slot.onQuickTransfer(originalStack, stackCopy);
+            if (originalStack.isEmpty()) {
+                slot.setStack(ItemStack.EMPTY);
+            } else {
+                slot.markDirty();
+            }
+        }
+
+        return stackCopy;
     }
 
     @Override

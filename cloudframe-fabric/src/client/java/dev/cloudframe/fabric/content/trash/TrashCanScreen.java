@@ -45,4 +45,11 @@ public class TrashCanScreen extends HandledScreen<TrashCanScreenHandler> {
         Text hint = Text.literal("Newest \u2190\u2192 Oldest (preview only)");
         context.drawText(this.textRenderer, hint, 8, 16, 0x404040, true);
     }
+
+    @Override
+    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        super.render(context, mouseX, mouseY, delta);
+        // Draw tooltips for hovered items
+        this.drawMouseoverTooltip(context, mouseX, mouseY);
+    }
 }

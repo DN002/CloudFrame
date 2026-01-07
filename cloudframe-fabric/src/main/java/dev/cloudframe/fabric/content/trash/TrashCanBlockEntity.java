@@ -31,47 +31,58 @@ public class TrashCanBlockEntity extends BlockEntity implements Inventory, Named
 
     /**
      * Accepts (deletes) the incoming stack and updates the preview to show what will be deleted next.
+     * Newest items appear on the LEFT. When full or different, items push RIGHT and fall off the end.
      *
      * @return how many items were accepted (normally the full stack count)
      */
     public int accept(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return 0;
 
-        // Shift history to the right; far-right is forgotten (already deleted).
-        for (int i = SLOT_COUNT - 1; i >= 1; i--) {
-            previewSlots.set(i, previewSlots.get(i - 1));
-        }
-
-        // Insert newest on the left.
         ItemStack incoming = stack.copy();
         int max = Math.max(1, incoming.getMaxCount());
         if (incoming.getCount() > max) {
             incoming.setCount(max);
         }
-        previewSlots.set(0, incoming);
 
-        // Merge adjacent identical stacks left-to-right (keep newest on the left).
-        for (int i = 0; i < SLOT_COUNT - 1; i++) {
-            ItemStack left = previewSlots.get(i);
-            if (left == null || left.isEmpty()) continue;
+        // Check if slot 0 is empty
+        ItemStack leftmost = previewSlots.get(0);
+        if (leftmost == null || leftmost.isEmpty()) {
+            // Slot 0 is empty, just place the item there without shifting
+            previewSlots.set(0, incoming);
+            markDirty();
+            if (world != null && !world.isClient()) {
+                world.updateListeners(pos, getCachedState(), getCachedState(), 3);
+            }
+            return stack.getCount();
+        }
 
-            ItemStack right = previewSlots.get(i + 1);
-            if (right == null || right.isEmpty()) continue;
-
-            if (!ItemStack.areItemsAndComponentsEqual(left, right)) continue;
-
-            int space = left.getMaxCount() - left.getCount();
-            if (space <= 0) continue;
-
-            int move = Math.min(space, right.getCount());
-            if (move <= 0) continue;
-
-            left.increment(move);
-            right.decrement(move);
-            if (right.isEmpty()) {
-                previewSlots.set(i + 1, ItemStack.EMPTY);
+        // Slot 0 has an item, check if we can stack
+        if (ItemStack.areItemsAndComponentsEqual(leftmost, incoming)) {
+            int space = leftmost.getMaxCount() - leftmost.getCount();
+            if (space > 0) {
+                // Stack into the leftmost slot
+                int addAmount = Math.min(space, incoming.getCount());
+                leftmost.increment(addAmount);
+                incoming.decrement(addAmount);
+                
+                // If we consumed all the incoming items, we're done
+                if (incoming.isEmpty()) {
+                    markDirty();
+                    if (world != null && !world.isClient()) {
+                        world.updateListeners(pos, getCachedState(), getCachedState(), 3);
+                    }
+                    return stack.getCount();
+                }
             }
         }
+
+        // Leftmost is full or different item - shift everything right (far-right is deleted)
+        for (int i = SLOT_COUNT - 1; i >= 1; i--) {
+            previewSlots.set(i, previewSlots.get(i - 1));
+        }
+
+        // Insert remaining/new items on the left
+        previewSlots.set(0, incoming);
 
         markDirty();
         if (world != null && !world.isClient()) {
@@ -106,18 +117,60 @@ public class TrashCanBlockEntity extends BlockEntity implements Inventory, Named
 
     @Override
     public ItemStack removeStack(int slot, int amount) {
-        // Players cannot take items out of the trash can.
-        return ItemStack.EMPTY;
+        if (slot < 0 || slot >= SLOT_COUNT) return ItemStack.EMPTY;
+        ItemStack current = previewSlots.get(slot);
+        if (current == null || current.isEmpty()) return ItemStack.EMPTY;
+
+        ItemStack removed = current.split(amount);
+        if (current.isEmpty()) {
+            previewSlots.set(slot, ItemStack.EMPTY);
+            // Shift all slots right to close the gap (slot 0 becomes empty)
+            shiftSlotsRight(slot);
+        }
+        markDirty();
+        if (world != null && !world.isClient()) {
+            world.updateListeners(pos, getCachedState(), getCachedState(), 3);
+        }
+        return removed;
     }
 
     @Override
     public ItemStack removeStack(int slot) {
-        return ItemStack.EMPTY;
+        if (slot < 0 || slot >= SLOT_COUNT) return ItemStack.EMPTY;
+        ItemStack current = previewSlots.get(slot);
+        if (current == null || current.isEmpty()) return ItemStack.EMPTY;
+
+        previewSlots.set(slot, ItemStack.EMPTY);
+        // Shift all slots right to close the gap (slot 0 becomes empty)
+        shiftSlotsRight(slot);
+        markDirty();
+        if (world != null && !world.isClient()) {
+            world.updateListeners(pos, getCachedState(), getCachedState(), 3);
+        }
+        return current;
+    }
+
+    /**
+     * Shifts slots right starting from the removed position to close gaps.
+     * All slots before the removed slot move right by one position.
+     * This leaves slot 0 empty and ready for new items.
+     */
+    private void shiftSlotsRight(int removedSlot) {
+        for (int i = removedSlot; i > 0; i--) {
+            previewSlots.set(i, previewSlots.get(i - 1));
+        }
+        previewSlots.set(0, ItemStack.EMPTY);
     }
 
     @Override
     public void setStack(int slot, ItemStack stack) {
-        // Players cannot insert items through the GUI; ignore.
+        // Only slot 0 accepts manual insertions (for trashing items)
+        if (slot == 0) {
+            if (stack != null && !stack.isEmpty()) {
+                accept(stack);
+            }
+        }
+        // Other slots cannot be manually set
     }
 
     @Override

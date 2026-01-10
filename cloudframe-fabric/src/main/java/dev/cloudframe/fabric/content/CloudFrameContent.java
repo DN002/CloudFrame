@@ -32,7 +32,7 @@ public final class CloudFrameContent {
     private CloudFrameContent() {
     }
 
-    public static final Identifier TUBE_ID = Identifier.of(CloudFrameFabric.MOD_ID, "tube");
+    public static final Identifier CLOUD_PIPE_ID = Identifier.of(CloudFrameFabric.MOD_ID, "cloud_pipe");
     public static final Identifier CLOUD_CABLE_ID = Identifier.of(CloudFrameFabric.MOD_ID, "cloud_cable");
     public static final Identifier STRATUS_PANEL_ID = Identifier.of(CloudFrameFabric.MOD_ID, "stratus_panel");
     public static final Identifier CLOUD_TURBINE_ID = Identifier.of(CloudFrameFabric.MOD_ID, "cloud_turbine");
@@ -47,7 +47,7 @@ public final class CloudFrameContent {
     public static final Identifier SPEED_AUGMENT_2_ID = Identifier.of(CloudFrameFabric.MOD_ID, "speed_augment_2");
     public static final Identifier SPEED_AUGMENT_3_ID = Identifier.of(CloudFrameFabric.MOD_ID, "speed_augment_3");
 
-    public static Block TUBE_BLOCK;
+    public static Block CLOUD_PIPE_BLOCK;
     public static Block CLOUD_CABLE_BLOCK;
     public static Block STRATUS_PANEL_BLOCK;
     public static Block CLOUD_TURBINE_BLOCK;
@@ -56,7 +56,7 @@ public final class CloudFrameContent {
     public static Block MARKER_BLOCK;
     public static Block TRASH_CAN_BLOCK;
 
-    public static Item TUBE;
+    public static Item CLOUD_PIPE;
     public static Item CLOUD_CABLE;
     public static Item STRATUS_PANEL;
     public static Item CLOUD_TURBINE;
@@ -95,8 +95,8 @@ public final class CloudFrameContent {
         return CLOUD_CELL_BLOCK;
     }
 
-    public static Block getTubeBlock() {
-        return TUBE_BLOCK;
+    public static Block getCloudPipeBlock() {
+        return CLOUD_PIPE_BLOCK;
     }
 
     public static Block getCloudCableBlock() {
@@ -162,14 +162,14 @@ public final class CloudFrameContent {
 
     public static void registerAll() {
         // Blocks
-        TUBE_BLOCK = Registry.register(
+        CLOUD_PIPE_BLOCK = Registry.register(
             Registries.BLOCK,
-            TUBE_ID,
+            CLOUD_PIPE_ID,
             new TubeBlock(
                 AbstractBlock.Settings.copy(Blocks.GLASS)
                     .strength(3.0f, 6.0f)  // Requires holding pickaxe to mine
                     .requiresTool()
-                    .registryKey(blockKey(TUBE_ID))
+                    .registryKey(blockKey(CLOUD_PIPE_ID))
             )
         );
 
@@ -245,10 +245,10 @@ public final class CloudFrameContent {
         );
 
         // Items
-        TUBE = Registry.register(
+        CLOUD_PIPE = Registry.register(
             Registries.ITEM,
-            TUBE_ID,
-            new BlockItem(TUBE_BLOCK, new Item.Settings().registryKey(itemKey(TUBE_ID)))
+            CLOUD_PIPE_ID,
+            new BlockItem(CLOUD_PIPE_BLOCK, new Item.Settings().registryKey(itemKey(CLOUD_PIPE_ID)))
         );
 
         CLOUD_CABLE = Registry.register(
@@ -372,8 +372,8 @@ public final class CloudFrameContent {
         // Startup sanity: log what actually got registered.
         try {
             var debug = dev.cloudframe.common.util.DebugManager.get(CloudFrameContent.class);
-            debug.log("register", "Registered blocks: pipe=" + Registries.BLOCK.getId(TUBE_BLOCK) + " cable=" + Registries.BLOCK.getId(CLOUD_CABLE_BLOCK) + " stratus=" + Registries.BLOCK.getId(STRATUS_PANEL_BLOCK) + " turbine=" + Registries.BLOCK.getId(CLOUD_TURBINE_BLOCK) + " cell=" + Registries.BLOCK.getId(CLOUD_CELL_BLOCK) + " controller=" + Registries.BLOCK.getId(QUARRY_CONTROLLER_BLOCK));
-            debug.log("register", "Registered items: pipe=" + Registries.ITEM.getId(TUBE) + " cable=" + Registries.ITEM.getId(CLOUD_CABLE) + " stratus=" + Registries.ITEM.getId(STRATUS_PANEL) + " turbine=" + Registries.ITEM.getId(CLOUD_TURBINE) + " cell=" + Registries.ITEM.getId(CLOUD_CELL) + " controller=" + Registries.ITEM.getId(QUARRY_CONTROLLER) + " marker=" + Registries.ITEM.getId(MARKER) + " wrench=" + Registries.ITEM.getId(WRENCH) + " silk=" + Registries.ITEM.getId(SILK_TOUCH_AUGMENT) + " speed1=" + Registries.ITEM.getId(SPEED_AUGMENT_1) + " speed2=" + Registries.ITEM.getId(SPEED_AUGMENT_2) + " speed3=" + Registries.ITEM.getId(SPEED_AUGMENT_3));
+            debug.log("register", "Registered blocks: pipe=" + Registries.BLOCK.getId(CLOUD_PIPE_BLOCK) + " cable=" + Registries.BLOCK.getId(CLOUD_CABLE_BLOCK) + " stratus=" + Registries.BLOCK.getId(STRATUS_PANEL_BLOCK) + " turbine=" + Registries.BLOCK.getId(CLOUD_TURBINE_BLOCK) + " cell=" + Registries.BLOCK.getId(CLOUD_CELL_BLOCK) + " controller=" + Registries.BLOCK.getId(QUARRY_CONTROLLER_BLOCK));
+            debug.log("register", "Registered items: pipe=" + Registries.ITEM.getId(CLOUD_PIPE) + " cable=" + Registries.ITEM.getId(CLOUD_CABLE) + " stratus=" + Registries.ITEM.getId(STRATUS_PANEL) + " turbine=" + Registries.ITEM.getId(CLOUD_TURBINE) + " cell=" + Registries.ITEM.getId(CLOUD_CELL) + " controller=" + Registries.ITEM.getId(QUARRY_CONTROLLER) + " marker=" + Registries.ITEM.getId(MARKER) + " wrench=" + Registries.ITEM.getId(WRENCH) + " silk=" + Registries.ITEM.getId(SILK_TOUCH_AUGMENT) + " speed1=" + Registries.ITEM.getId(SPEED_AUGMENT_1) + " speed2=" + Registries.ITEM.getId(SPEED_AUGMENT_2) + " speed3=" + Registries.ITEM.getId(SPEED_AUGMENT_3));
         } catch (Exception ignored) {
             // Avoid hard-failing startup just for logging.
         }

@@ -1,6 +1,6 @@
 {
   "parent": "minecraft:item/generated",
   "textures": {
-    "layer0": "cloudframe:item/cloud_tube_arm_end"
+    "layer0": "cloudframe:item/cloud_pipe_arm_end"
   }
 }

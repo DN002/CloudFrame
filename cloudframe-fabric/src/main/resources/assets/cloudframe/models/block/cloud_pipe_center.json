@@ -1,8 +1,8 @@
 {
   "parent": "minecraft:block/block",
   "textures": {
-    "side": "cloudframe:item/cloud_tube_center",
-    "particle": "cloudframe:item/cloud_tube_center"
+    "side": "cloudframe:block/cloud_pipe_center",
+    "particle": "cloudframe:block/cloud_pipe_center"
   },
   "elements": [
     {

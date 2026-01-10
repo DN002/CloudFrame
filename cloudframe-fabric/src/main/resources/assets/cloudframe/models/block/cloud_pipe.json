@@ -1,6 +1,6 @@
 {
   "parent": "minecraft:block/cube_all",
   "textures": {
-    "all": "cloudframe:item/cloud_tube_center"
+    "all": "cloudframe:block/cloud_pipe_center"
   }
 }

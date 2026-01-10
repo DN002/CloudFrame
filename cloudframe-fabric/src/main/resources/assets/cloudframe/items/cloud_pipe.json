@@ -1,6 +1,6 @@
 {
   "model": {
     "type": "minecraft:model",
-    "model": "cloudframe:item/tube"
+    "model": "cloudframe:item/cloud_pipe"
   }
 }

@@ -39,7 +39,7 @@ public final class CloudFrameGiveCommand {
     private static Map<String, Item> getItemsMap() {
         Map<String, Item> items = new LinkedHashMap<>();
         // Primary naming
-        items.put("pipe", CloudFrameContent.TUBE);
+        items.put("pipe", CloudFrameContent.CLOUD_PIPE);
         items.put("pipe_filter", CloudFrameContent.getPipeFilter());
         items.put("filter", CloudFrameContent.getPipeFilter());
         items.put("cable", CloudFrameContent.CLOUD_CABLE);

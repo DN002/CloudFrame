@@ -1,9 +1,9 @@
 {
   "parent": "minecraft:block/block",
   "textures": {
-    "side": "cloudframe:item/cloud_tube_arm_side",
-    "end": "cloudframe:item/cloud_tube_arm_end",
-    "particle": "cloudframe:item/cloud_tube_arm_side"
+    "side": "cloudframe:block/cloud_pipe_arm_side",
+    "end": "cloudframe:block/cloud_pipe_arm_end",
+    "particle": "cloudframe:block/cloud_pipe_arm_side"
   },
   "elements": [
     {

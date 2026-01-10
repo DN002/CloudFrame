@@ -205,7 +205,6 @@ public class TubeBlock extends Block {
         BlockPos pos = ctx.getBlockPos();
         return updateConnections(state, world, pos);
     }
-
     @Override
     public BlockState getStateForNeighborUpdate(
         BlockState state,
@@ -217,16 +216,59 @@ public class TubeBlock extends Block {
         BlockState neighborState,
         net.minecraft.util.math.random.Random random
     ) {
-        // Only update the one side that changed.
+        // When a neighbor block is removed, re-enable connection and drop any filter
+        if (world instanceof ServerWorld serverWorld) {
+            // Check if neighbor is being removed (becoming air or non-connectable)
+            boolean neighborRemoved = neighborState == null || neighborState.isAir() || !canConnectTo(world, pos, direction, neighborPos, neighborState);
+            
+            if (neighborRemoved) {
+                // Always re-enable the connection when neighbor is removed (resets wrench toggle)
+                reEnableConnection(serverWorld, pos, direction);
+                
+                // Drop any filter that was on this connection
+                dropFilterIfPresent(serverWorld, pos, direction);
+            }
+        }
+        
+        // Update both connection and filter properties for the changed side
+        // After dropping the filter above, there won't be a filter anymore
         boolean connected = shouldConnect(world, pos, direction, neighborPos, neighborState);
+        boolean hasFilter = connected && checkFilterExists(world, pos, direction);
+        
         return switch (direction) {
-            case NORTH -> state.with(NORTH, connected);
-            case SOUTH -> state.with(SOUTH, connected);
-            case EAST -> state.with(EAST, connected);
-            case WEST -> state.with(WEST, connected);
-            case UP -> state.with(UP, connected);
-            case DOWN -> state.with(DOWN, connected);
+            case NORTH -> state.with(NORTH, connected).with(FILTER_NORTH, hasFilter);
+            case SOUTH -> state.with(SOUTH, connected).with(FILTER_SOUTH, hasFilter);
+            case EAST -> state.with(EAST, connected).with(FILTER_EAST, hasFilter);
+            case WEST -> state.with(WEST, connected).with(FILTER_WEST, hasFilter);
+            case UP -> state.with(UP, connected).with(FILTER_UP, hasFilter);
+            case DOWN -> state.with(DOWN, connected).with(FILTER_DOWN, hasFilter);
         };
+    }
+
+    /**
+     * Check if we can potentially connect to this neighbor (ignoring disabled state)
+     */
+    private boolean canConnectTo(WorldView world, BlockPos pipePos, Direction dirToNeighbor, BlockPos neighborPos, BlockState neighborState) {
+        if (neighborState == null || neighborState.isAir()) return false;
+
+        // Can connect to other tubes
+        if (neighborState.getBlock() instanceof TubeBlock) {
+            return true;
+        }
+
+        // Can connect to quarry controller
+        if (CloudFrameContent.getQuarryControllerBlock() != null
+            && neighborState.isOf(CloudFrameContent.getQuarryControllerBlock())) {
+            return true;
+        }
+
+        // Can connect to inventories
+        if (neighborState.hasBlockEntity()) {
+            var be = world.getBlockEntity(neighborPos);
+            return be instanceof Inventory;
+        }
+
+        return false;
     }
 
     private BlockState updateConnections(BlockState state, WorldAccess world, BlockPos pos) {
@@ -404,10 +446,131 @@ public class TubeBlock extends Block {
         CloudFrameFabric instance = CloudFrameFabric.instance();
         if (instance == null || instance.getPipeManager() == null) return;
 
-        instance.getPipeManager().removePipe(GlobalPos.create(world.getRegistryKey(), pos.toImmutable()));
-
+        // Drop all filters before removing the pipe
         if (instance.getPipeFilterManager() != null) {
-            instance.getPipeFilterManager().removeAllAt(GlobalPos.create(world.getRegistryKey(), pos.toImmutable()));
+            GlobalPos globalPos = GlobalPos.create(world.getRegistryKey(), pos.toImmutable());
+            
+            // Check all 6 directions for filters and drop them
+            for (int dirIndex = 0; dirIndex < 6; dirIndex++) {
+                if (instance.getPipeFilterManager().hasFilter(globalPos, dirIndex)) {
+                    var filterState = instance.getPipeFilterManager().get(globalPos, dirIndex);
+                    
+                    // Create filter item with saved configuration
+                    ItemStack drop = new ItemStack(CloudFrameContent.getPipeFilter(), 1);
+                    PipeFilterItem.writeItemConfigFromFilterState(drop, filterState);
+                    
+                    // Drop the filter at the pipe's location
+                    ItemScatterer.spawn(world, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, drop);
+                }
+            }
+            
+            // Now remove all filters from the database
+            instance.getPipeFilterManager().removeAllAt(globalPos);
         }
+
+        instance.getPipeManager().removePipe(GlobalPos.create(world.getRegistryKey(), pos.toImmutable()));
+    }
+
+    /**
+     * Get the connection property for a given direction
+     */
+    private BooleanProperty getDirectionProperty(Direction direction) {
+        return switch (direction) {
+            case NORTH -> NORTH;
+            case SOUTH -> SOUTH;
+            case EAST -> EAST;
+            case WEST -> WEST;
+            case UP -> UP;
+            case DOWN -> DOWN;
+        };
+    }
+
+    /**
+     * Drop a pipe filter at this position if one exists for the given direction
+     */
+    private void dropFilterIfPresent(ServerWorld world, BlockPos pipePos, Direction direction) {
+        CloudFrameFabric instance = CloudFrameFabric.instance();
+        if (instance == null || instance.getPipeFilterManager() == null) {
+            return;
+        }
+
+        GlobalPos globalPipePos = GlobalPos.create(world.getRegistryKey(), pipePos.toImmutable());
+        int dirIndex = toDirIndex(direction);
+
+        if (instance.getPipeFilterManager().hasFilter(globalPipePos, dirIndex)) {
+            var filterState = instance.getPipeFilterManager().get(globalPipePos, dirIndex);
+            instance.getPipeFilterManager().removeFilter(globalPipePos, dirIndex);
+
+            // Create filter item with saved configuration
+            ItemStack drop = new ItemStack(CloudFrameContent.getPipeFilter(), 1);
+            PipeFilterItem.writeItemConfigFromFilterState(drop, filterState);
+
+            // Drop the filter at the pipe's location
+            ItemScatterer.spawn(world, pipePos.getX() + 0.5, pipePos.getY() + 0.5, pipePos.getZ() + 0.5, drop);
+        }
+    }
+
+    /**
+     * Re-enable a pipe connection when the adjacent block is removed
+     */
+    private void reEnableConnection(ServerWorld world, BlockPos pipePos, Direction direction) {
+        CloudFrameFabric instance = CloudFrameFabric.instance();
+        if (instance == null || instance.getPipeConnectionService() == null) {
+            return;
+        }
+
+        PipeKey key = new PipeKey(
+            world.getRegistryKey().getValue().toString(),
+            pipePos.getX(),
+            pipePos.getY(),
+            pipePos.getZ()
+        );
+
+        int dirIndex = toDirIndex(direction);
+        
+        // If this side was disabled, re-enable it
+        if (instance.getPipeConnectionService().isSideDisabled(key, dirIndex)) {
+            instance.getPipeConnectionService().toggleSide(key, dirIndex);
+            
+            // Update the pipe node's disabled sides mask
+            var pipeNode = instance.getPipeManager().getPipe(GlobalPos.create(world.getRegistryKey(), pipePos.toImmutable()));
+            if (pipeNode != null) {
+                int mask = instance.getPipeConnectionService().getDisabledSidesMask(key);
+                pipeNode.setDisabledInventorySides(mask);
+            }
+        }
+    }
+
+    /**
+     * Convert Direction to directional index (matching WrenchItem convention)
+     */
+    private static int toDirIndex(Direction side) {
+        return switch (side) {
+            case EAST -> 0;   // +X
+            case WEST -> 1;   // -X
+            case UP -> 2;     // +Y
+            case DOWN -> 3;   // -Y
+            case SOUTH -> 4;  // +Z
+            case NORTH -> 5;  // -Z
+        };
+    }
+
+    /**
+     * Check if a filter exists in the database for this pipe position and direction
+     */
+    private boolean checkFilterExists(WorldView world, BlockPos pipePos, Direction direction) {
+        CloudFrameFabric instance = CloudFrameFabric.instance();
+        if (instance == null || instance.getPipeFilterManager() == null) {
+            return false;
+        }
+
+        if (!(world instanceof ServerWorld serverWorld)) {
+            return false;
+        }
+
+        GlobalPos globalPos = GlobalPos.create(serverWorld.getRegistryKey(), pipePos.toImmutable());
+        int dirIndex = toDirIndex(direction);
+        
+        return instance.getPipeFilterManager().hasFilter(globalPos, dirIndex);
     }
 }

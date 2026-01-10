@@ -53,7 +53,7 @@ public class WrenchItem extends Item {
         }
 
         // Check if clicking on a cloud pipe
-        if (CloudFrameContent.getTubeBlock() != null && context.getWorld().getBlockState(clickedPos).isOf(CloudFrameContent.getTubeBlock())) {
+        if (CloudFrameContent.getCloudPipeBlock() != null && context.getWorld().getBlockState(clickedPos).isOf(CloudFrameContent.getCloudPipeBlock())) {
             if (instance.getPipeManager() == null) return ActionResult.PASS;
 
             if (instance.getPipeConnectionService() == null) return ActionResult.PASS;
@@ -81,7 +81,7 @@ public class WrenchItem extends Item {
             BlockState neighborState = world.getBlockState(neighborPos);
 
             boolean toggleable = false;
-            if (CloudFrameContent.getTubeBlock() != null && neighborState.isOf(CloudFrameContent.getTubeBlock())) {
+            if (CloudFrameContent.getCloudPipeBlock() != null && neighborState.isOf(CloudFrameContent.getCloudPipeBlock())) {
                 // Allow disabling pipe-to-pipe adjacency so separate networks can run side-by-side.
                 toggleable = true;
             } else if (CloudFrameContent.getQuarryControllerBlock() != null && neighborState.isOf(CloudFrameContent.getQuarryControllerBlock())) {
@@ -110,7 +110,7 @@ public class WrenchItem extends Item {
             boolean nowDisabled = instance.getPipeConnectionService().isSideDisabled(key, dirIndex);
 
             // If toggling a pipe-to-pipe connection, also toggle the opposite side on the neighbor
-            if (CloudFrameContent.getTubeBlock() != null && neighborState != null && neighborState.isOf(CloudFrameContent.getTubeBlock())) {
+            if (CloudFrameContent.getCloudPipeBlock() != null && neighborState != null && neighborState.isOf(CloudFrameContent.getCloudPipeBlock())) {
                 int oppositeDir = getOppositeDirectionIndex(dirIndex);
                 PipeKey neighborKey = new PipeKey(
                     world.getRegistryKey().getValue().toString(),
@@ -148,7 +148,7 @@ public class WrenchItem extends Item {
 
             // Update the tube's connection arms immediately (server -> client sync via blockstate).
             TubeBlock.refreshConnections(world, clickedPos);
-            if (CloudFrameContent.getTubeBlock() != null && neighborState != null && neighborState.isOf(CloudFrameContent.getTubeBlock())) {
+            if (CloudFrameContent.getCloudPipeBlock() != null && neighborState != null && neighborState.isOf(CloudFrameContent.getCloudPipeBlock())) {
                 TubeBlock.refreshConnections(world, neighborPos);
             }
             

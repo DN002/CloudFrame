@@ -63,7 +63,7 @@ public class FabricWrenchMarkerActivationListener {
             }
 
             // Let the wrench's pipe-connection toggle logic handle tube blocks.
-            if (CloudFrameContent.getTubeBlock() != null && clickedState.isOf(CloudFrameContent.getTubeBlock())) {
+            if (CloudFrameContent.getCloudPipeBlock() != null && clickedState.isOf(CloudFrameContent.getCloudPipeBlock())) {
                 return ActionResult.PASS;
             }
 

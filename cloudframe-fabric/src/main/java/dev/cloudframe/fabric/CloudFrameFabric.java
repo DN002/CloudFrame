@@ -149,8 +149,8 @@ public class CloudFrameFabric implements ModInitializer {
             if (world.isClient()) return ActionResult.PASS;
             if (!(player instanceof ServerPlayerEntity serverPlayer)) return ActionResult.PASS;
 
-            if (CloudFrameContent.getTubeBlock() == null) return ActionResult.PASS;
-            if (!world.getBlockState(pos).isOf(CloudFrameContent.getTubeBlock())) return ActionResult.PASS;
+            if (CloudFrameContent.getCloudPipeBlock() == null) return ActionResult.PASS;
+            if (!world.getBlockState(pos).isOf(CloudFrameContent.getCloudPipeBlock())) return ActionResult.PASS;
 
             CloudFrameFabric instance = CloudFrameFabric.instance();
             if (instance == null || instance.getPipeFilterManager() == null) return ActionResult.PASS;

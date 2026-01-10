@@ -172,7 +172,7 @@ public class FabricQuarryPlatform implements QuarryPlatform {
     @Override
     public boolean hasValidOutput(Object controllerLoc) {
         if (!(controllerLoc instanceof GlobalPos gp)) return false;
-        if (CloudFrameContent.getTubeBlock() == null) return false;
+        if (CloudFrameContent.getCloudPipeBlock() == null) return false;
 
         PipeConnectivityAccess access = new PipeConnectivityAccess() {
             @Override
@@ -206,7 +206,7 @@ public class FabricQuarryPlatform implements QuarryPlatform {
                 ServerWorld w = server.getWorld(p.dimension());
                 if (w == null) return false;
                 if (!isChunkLoaded(p)) return false;
-                return w.getBlockState(p.pos()).isOf(CloudFrameContent.getTubeBlock());
+                return w.getBlockState(p.pos()).isOf(CloudFrameContent.getCloudPipeBlock());
             }
 
             @Override
@@ -216,7 +216,7 @@ public class FabricQuarryPlatform implements QuarryPlatform {
                 if (w == null) return false;
                 if (!isChunkLoaded(p)) return false;
                 BlockState state = w.getBlockState(p.pos());
-                if (!state.isOf(CloudFrameContent.getTubeBlock())) return false;
+                if (!state.isOf(CloudFrameContent.getCloudPipeBlock())) return false;
                 Direction dir = dirFromIndex(dirIndex);
                 return dir != null && tubeConnects(state, dir);
             }
@@ -495,6 +495,17 @@ public class FabricQuarryPlatform implements QuarryPlatform {
         // mining the glass *frame ring* specifically so players can place glass inside the
         // mined area and have it removed.
         if (block == Blocks.AIR || block == Blocks.BEDROCK) return false;
+        
+        // CloudFrame blocks have custom shapes and don't fill the block, so state.isSolid() is false.
+        // Explicitly check for CloudFrame placeable blocks.
+        if (block == CloudFrameContent.getCloudPipeBlock()) return true;
+        if (block == CloudFrameContent.getCloudCableBlock()) return true;
+        if (block == CloudFrameContent.TRASH_CAN_BLOCK) return true;
+        if (block == CloudFrameContent.getQuarryControllerBlock()) return true;
+        if (block == CloudFrameContent.getStratusPanelBlock()) return true;
+        if (block == CloudFrameContent.getCloudTurbineBlock()) return true;
+        if (block == CloudFrameContent.getCloudCellBlock()) return true;
+        
         return state.isSolid() || block == Blocks.WATER || block == Blocks.LAVA;
     }
 
@@ -504,6 +515,7 @@ public class FabricQuarryPlatform implements QuarryPlatform {
         if (pos == null) return List.of();
         ServerWorld world = worldOf(null, loc);
         BlockState state = world.getBlockState(pos);
+        Block block = state.getBlock();
         
         List<Object> result = new ArrayList<>();
         ItemStack tool = new ItemStack(Items.DIAMOND_PICKAXE);
@@ -522,16 +534,66 @@ public class FabricQuarryPlatform implements QuarryPlatform {
             builder.add(LootContextParameters.TOOL, tool);
             
             List<ItemStack> drops = state.getDroppedStacks(builder);
+            
+            // If loot table didn't return anything for CloudFrame blocks, manually create drops
+            if ((drops == null || drops.isEmpty()) && isCloudFrameBlock(block)) {
+                drops = new ArrayList<>();
+                if (block == CloudFrameContent.getCloudPipeBlock()) {
+                    drops.add(new ItemStack(CloudFrameContent.CLOUD_PIPE));
+                } else if (block == CloudFrameContent.getCloudCableBlock()) {
+                    drops.add(new ItemStack(CloudFrameContent.CLOUD_CABLE));
+                } else if (block == CloudFrameContent.TRASH_CAN_BLOCK) {
+                    drops.add(new ItemStack(CloudFrameContent.TRASH_CAN));
+                } else if (block == CloudFrameContent.getQuarryControllerBlock()) {
+                    drops.add(new ItemStack(CloudFrameContent.QUARRY_CONTROLLER));
+                } else if (block == CloudFrameContent.getStratusPanelBlock()) {
+                    drops.add(new ItemStack(CloudFrameContent.STRATUS_PANEL));
+                } else if (block == CloudFrameContent.getCloudTurbineBlock()) {
+                    drops.add(new ItemStack(CloudFrameContent.CLOUD_TURBINE));
+                } else if (block == CloudFrameContent.getCloudCellBlock()) {
+                    drops.add(new ItemStack(CloudFrameContent.CLOUD_CELL));
+                }
+            }
+            
             for (ItemStack drop : drops) {
                 if (drop != null && !drop.isEmpty()) {
                     result.add(drop);
                 }
             }
         } catch (Throwable ex) {
-            result.add(new ItemStack(state.getBlock()));
+            // On error, fall back to creating the block item
+            if (isCloudFrameBlock(block)) {
+                if (block == CloudFrameContent.getCloudPipeBlock()) {
+                    result.add(new ItemStack(CloudFrameContent.CLOUD_PIPE));
+                } else if (block == CloudFrameContent.getCloudCableBlock()) {
+                    result.add(new ItemStack(CloudFrameContent.CLOUD_CABLE));
+                } else if (block == CloudFrameContent.TRASH_CAN_BLOCK) {
+                    result.add(new ItemStack(CloudFrameContent.TRASH_CAN));
+                } else if (block == CloudFrameContent.getQuarryControllerBlock()) {
+                    result.add(new ItemStack(CloudFrameContent.QUARRY_CONTROLLER));
+                } else if (block == CloudFrameContent.getStratusPanelBlock()) {
+                    result.add(new ItemStack(CloudFrameContent.STRATUS_PANEL));
+                } else if (block == CloudFrameContent.getCloudTurbineBlock()) {
+                    result.add(new ItemStack(CloudFrameContent.CLOUD_TURBINE));
+                } else if (block == CloudFrameContent.getCloudCellBlock()) {
+                    result.add(new ItemStack(CloudFrameContent.CLOUD_CELL));
+                }
+            } else {
+                result.add(new ItemStack(block));
+            }
         }
         
         return result;
+    }
+    
+    private boolean isCloudFrameBlock(Block block) {
+        return block == CloudFrameContent.getCloudPipeBlock() || 
+               block == CloudFrameContent.getCloudCableBlock() || 
+               block == CloudFrameContent.TRASH_CAN_BLOCK || 
+               block == CloudFrameContent.getQuarryControllerBlock() ||
+               block == CloudFrameContent.getStratusPanelBlock() || 
+               block == CloudFrameContent.getCloudTurbineBlock() ||
+               block == CloudFrameContent.getCloudCellBlock();
     }
 
     @Override

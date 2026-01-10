@@ -9,5 +9,5 @@
     "C": { "item": "minecraft:copper_block" },
     "B": { "item": "minecraft:blue_dye" }
   },
-  "result": { "item": "cloudframe:tube", "count": 8 }
+  "result": { "item": "cloudframe:cloud_pipe", "count": 8 }
 }

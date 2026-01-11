@@ -132,8 +132,8 @@ public class FabricQuarryPlatform implements QuarryPlatform {
 
         long fromNetwork = FabricPowerNetworkManager.extractPowerCfe(server, controllerLoc, amount);
         if (fromNetwork >= amount) {
-            // If the network can satisfy the quarry, allow the controller to store any leftover
-            // per-tick generation as buffer (surplus only; does not drain cells).
+            // If the network can satisfy the quarry, keep the controller-local buffer topped off.
+            // This buffer is intended to behave like a short hold-up capacitor at the controller.
             if (controllerLoc instanceof GlobalPos gp) {
                 ServerWorld w = server.getWorld(gp.dimension());
                 if (w != null) {
@@ -143,7 +143,7 @@ public class FabricQuarryPlatform implements QuarryPlatform {
                         long stored = qbe.getPowerBufferStoredCfe();
                         long missing = Math.max(0L, cap - stored);
                         if (missing > 0L) {
-                            long got = FabricPowerNetworkManager.extractGenerationOnlyCfe(server, controllerLoc, missing);
+                            long got = FabricPowerNetworkManager.extractPowerCfe(server, controllerLoc, missing);
                             if (got > 0L) {
                                 qbe.insertPowerToBuffer(got);
                             }
@@ -165,7 +165,28 @@ public class FabricQuarryPlatform implements QuarryPlatform {
         long remaining = amount - Math.max(0L, fromNetwork);
         if (remaining <= 0L) return fromNetwork;
 
+        long before = qbe.getPowerBufferStoredCfe();
         long fromBuffer = qbe.extractPowerFromBuffer(remaining);
+
+        // Debug: if we ever fall back to the buffer (especially large pulls), log it.
+        // Also: during controller power debug window, log every call regardless of size.
+        if (qbe.isPowerDebugActive() || fromBuffer > 0L || remaining >= 1000L) {
+            String where = "";
+            try {
+                where = "dim=" + gp.dimension().getValue() + ", pos=" + gp.pos() + ": ";
+            } catch (Throwable t) {
+                // ignore
+            }
+            debug.log(
+                "extractPowerCfe",
+                where + "req=" + amount
+                    + ", net=" + fromNetwork
+                    + ", remaining=" + remaining
+                    + ", bufBefore=" + before
+                    + ", bufAfter=" + qbe.getPowerBufferStoredCfe()
+                    + ", speed=" + qbe.getSpeedLevel()
+            );
+        }
         return fromNetwork + Math.max(0L, fromBuffer);
     }
 
@@ -511,6 +532,11 @@ public class FabricQuarryPlatform implements QuarryPlatform {
 
     @Override
     public List<Object> getDrops(Object loc, boolean silkTouch) {
+        return getDrops(loc, silkTouch, 0);
+    }
+
+    @Override
+    public List<Object> getDrops(Object loc, boolean silkTouch, int fortuneLevel) {
         BlockPos pos = posOf(loc);
         if (pos == null) return List.of();
         ServerWorld world = worldOf(null, loc);
@@ -526,6 +552,15 @@ public class FabricQuarryPlatform implements QuarryPlatform {
                     world.getRegistryManager().getOrThrow(RegistryKeys.ENCHANTMENT);
                 tool.addEnchantment(enchantments.getOrThrow(Enchantments.SILK_TOUCH), 1);
             } catch (Throwable ignored) {}
+        } else {
+            int f = Math.max(0, Math.min(3, fortuneLevel));
+            if (f > 0) {
+                try {
+                    RegistryEntryLookup<net.minecraft.enchantment.Enchantment> enchantments =
+                        world.getRegistryManager().getOrThrow(RegistryKeys.ENCHANTMENT);
+                    tool.addEnchantment(enchantments.getOrThrow(Enchantments.FORTUNE), f);
+                } catch (Throwable ignored) {}
+            }
         }
 
         try {

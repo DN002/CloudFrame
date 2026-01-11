@@ -165,6 +165,7 @@ public class QuarryControllerBlock extends BlockWithEntity {
                 // Don't auto-start - player must toggle lever in GUI to begin mining
                 q.setSilkTouchAugment(be.isSilkTouch());
                 q.setSpeedAugmentLevel(be.getSpeedLevel());
+                q.setFortuneAugmentLevel(be.getFortuneLevel());
                 q.setOutputRoundRobin(be.isOutputRoundRobin());
 
                 instance.getQuarryManager().register(q);

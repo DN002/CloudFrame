@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " E ",
+    " B ",
+    "   "
+  ],
+  "key": {
+    "E": "minecraft:emerald",
+    "B": "minecraft:book"
+  },
+  "result": {
+    "count": 1,
+    "id": "cloudframe:silk_touch_augment"
+  }
+}

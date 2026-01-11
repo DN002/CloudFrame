@@ -1,4 +1,7 @@
 {
+  "itemGroup.cloudframe": "CloudFrame",
+  "advancement.cloudframe.all.title": "CloudFrame: Getting Started",
+  "advancement.cloudframe.all.desc": "Crafting your first wrench to manage CloudFrame objects.",
   "block.cloudframe.cloud_pipe": "Cloud Pipe",
   "block.cloudframe.cloud_cable": "Cloud Cable",
   "block.cloudframe.stratus_panel": "Stratus Panel",
@@ -20,7 +23,10 @@
   "item.cloudframe.pipe_filter.tooltip.remove": "Left-click the filter to remove it.",
   "item.cloudframe.wrench": "Wrench",
   "item.cloudframe.silk_touch_augment": "Silk Touch Augment",
-  "item.cloudframe.speed_augment_1": "Speed Augment I",
-  "item.cloudframe.speed_augment_2": "Speed Augment II",
-  "item.cloudframe.speed_augment_3": "Speed Augment III"
+  "item.cloudframe.speed_augment_1": "Speed Augment (Tier 1)",
+  "item.cloudframe.speed_augment_2": "Speed Augment (Tier 2)",
+  "item.cloudframe.speed_augment_3": "Speed Augment (Tier 3)",
+  "item.cloudframe.fortune_augment_1": "Fortune Augment (Tier 1)",
+  "item.cloudframe.fortune_augment_2": "Fortune Augment (Tier 2)",
+  "item.cloudframe.fortune_augment_3": "Fortune Augment (Tier 3)"
 }

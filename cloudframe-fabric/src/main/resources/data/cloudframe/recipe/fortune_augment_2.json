@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " E ",
+    " A ",
+    "   "
+  ],
+  "key": {
+    "E": "minecraft:emerald",
+    "A": "cloudframe:fortune_augment_1"
+  },
+  "result": {
+    "count": 1,
+    "id": "cloudframe:fortune_augment_2"
+  }
+}

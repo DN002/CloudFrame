@@ -59,6 +59,9 @@ public final class CloudFrameGiveCommand {
         items.put("speed1", CloudFrameContent.SPEED_AUGMENT_1);
         items.put("speed2", CloudFrameContent.SPEED_AUGMENT_2);
         items.put("speed3", CloudFrameContent.SPEED_AUGMENT_3);
+        items.put("fortune1", CloudFrameContent.FORTUNE_AUGMENT_1);
+        items.put("fortune2", CloudFrameContent.FORTUNE_AUGMENT_2);
+        items.put("fortune3", CloudFrameContent.FORTUNE_AUGMENT_3);
         return items;
     }
 
@@ -159,7 +162,7 @@ public final class CloudFrameGiveCommand {
         if ("silk".equals(type)) {
             ItemStack stack = dev.cloudframe.fabric.content.AugmentBooks.silkTouch();
             giveOrDropAtFeet.accept(stack);
-            target.sendMessage(Text.literal("Received: Silk Touch Augment"), false);
+            target.sendMessage(Text.literal("Received: ").append(stack.getName()), false);
             return 1;
         }
 
@@ -174,7 +177,23 @@ public final class CloudFrameGiveCommand {
             if (tier > 0) {
                 ItemStack stack = dev.cloudframe.fabric.content.AugmentBooks.speed(tier);
                 giveOrDropAtFeet.accept(stack);
-                target.sendMessage(Text.literal("Received: Speed Augment (Tier " + tier + ")"), false);
+                target.sendMessage(Text.literal("Received: ").append(stack.getName()), false);
+                return 1;
+            }
+        }
+
+        if (type != null && type.startsWith("fortune")) {
+            int tier = switch (type) {
+                case "fortune1" -> 1;
+                case "fortune2" -> 2;
+                case "fortune3" -> 3;
+                default -> 0;
+            };
+
+            if (tier > 0) {
+                ItemStack stack = dev.cloudframe.fabric.content.AugmentBooks.fortune(tier);
+                giveOrDropAtFeet.accept(stack);
+                target.sendMessage(Text.literal("Received: ").append(stack.getName()), false);
                 return 1;
             }
         }
@@ -194,7 +213,7 @@ public final class CloudFrameGiveCommand {
 
         giveOrDropAtFeet.accept(stack);
 
-        target.sendMessage(Text.literal("Received: " + type), false);
+        target.sendMessage(Text.literal("Received: ").append(stack.getName()), false);
         return 1;
     }
 }

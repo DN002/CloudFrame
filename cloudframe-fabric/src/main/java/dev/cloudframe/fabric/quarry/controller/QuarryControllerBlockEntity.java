@@ -26,8 +26,30 @@ import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.GlobalPos;
 import net.minecraft.world.World;
+import dev.cloudframe.common.util.Debug;
+import dev.cloudframe.common.util.DebugManager;
 
 public class QuarryControllerBlockEntity extends BlockEntity implements NamedScreenHandlerFactory {
+
+    private static final Debug debug = DebugManager.get(QuarryControllerBlockEntity.class);
+
+    // Debug window to trace power behavior around augment changes.
+    // Not persisted; counts down server ticks.
+    private int powerDebugTicks = 0;
+
+    public boolean isPowerDebugActive() {
+        return powerDebugTicks > 0;
+    }
+
+    private void triggerPowerDebugWindow(String reason) {
+        // 3 seconds of extra logging.
+        powerDebugTicks = 60;
+        debug.log(
+            "powerDebug",
+            "start: " + reason + ", dim=" + (world != null ? world.getRegistryKey().getValue() : "?") + ", pos=" + pos
+                + ", speed=" + speedLevel + ", stored=" + powerBufferCfe + ", cap=" + getPowerBufferCapacityCfe()
+        );
+    }
 
     // Matches common quarry energy model: 480 CFE per block at base speed.
     private static final long ENERGY_PER_BLOCK_CFE = 480L;
@@ -37,9 +59,11 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
 
     private boolean silkTouch = false;
     private int speedLevel = 0;
+    private int fortuneLevel = 0;
 
     private ItemStack silkAugmentStack = ItemStack.EMPTY;
     private ItemStack speedAugmentStack = ItemStack.EMPTY;
+    private ItemStack fortuneAugmentStack = ItemStack.EMPTY;
 
     // Owner UUID split across 4 ints (so it can be synced via PropertyDelegate later if needed)
     private int ownerMsh = 0;
@@ -59,12 +83,12 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
     private final Inventory augmentInventory = new Inventory() {
         @Override
         public int size() {
-            return 2;
+            return 3;
         }
 
         @Override
         public boolean isEmpty() {
-            return silkAugmentStack.isEmpty() && speedAugmentStack.isEmpty();
+            return silkAugmentStack.isEmpty() && speedAugmentStack.isEmpty() && fortuneAugmentStack.isEmpty();
         }
 
         @Override
@@ -72,6 +96,7 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
             return switch (slot) {
                 case 0 -> silkAugmentStack;
                 case 1 -> speedAugmentStack;
+                case 2 -> fortuneAugmentStack;
                 default -> ItemStack.EMPTY;
             };
         }
@@ -89,6 +114,8 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
                 setSilkTouch(false);
             } else if (slot == 1) {
                 setSpeedLevel(0);
+            } else if (slot == 2) {
+                setFortuneLevel(0);
             }
 
             return out;
@@ -104,10 +131,15 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
             if (stack == null || stack.isEmpty()) {
                 if (slot == 0) setSilkTouch(false);
                 if (slot == 1) setSpeedLevel(0);
+                if (slot == 2) setFortuneLevel(0);
                 return;
             }
 
             if (slot == 0) {
+                // Mutual exclusion: silk touch disables fortune.
+                if (fortuneLevel > 0) {
+                    return;
+                }
                 if (dev.cloudframe.fabric.content.AugmentBooks.isSilkTouch(stack)
                     || stack.getItem() instanceof dev.cloudframe.fabric.content.augments.SilkTouchAugmentItem) {
                     silkAugmentStack = stack.copy();
@@ -123,6 +155,20 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
                     speedAugmentStack = stack.copy();
                     speedAugmentStack.setCount(1);
                     setSpeedLevel(Math.max(1, Math.min(3, tier)));
+                }
+            } else if (slot == 2) {
+                // Mutual exclusion: fortune disables silk touch.
+                if (silkTouch) {
+                    return;
+                }
+                int tier = dev.cloudframe.fabric.content.AugmentBooks.fortuneTier(stack);
+                if (tier <= 0 && stack.getItem() instanceof dev.cloudframe.fabric.content.augments.FortuneAugmentItem fortune) {
+                    tier = fortune.tier();
+                }
+                if (tier > 0) {
+                    fortuneAugmentStack = stack.copy();
+                    fortuneAugmentStack.setCount(1);
+                    setFortuneLevel(Math.max(1, Math.min(3, tier)));
                 }
             }
         }
@@ -141,8 +187,10 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
         public void clear() {
             silkAugmentStack = ItemStack.EMPTY;
             speedAugmentStack = ItemStack.EMPTY;
+            fortuneAugmentStack = ItemStack.EMPTY;
             setSilkTouch(false);
             setSpeedLevel(0);
+            setFortuneLevel(0);
         }
     };
 
@@ -188,8 +236,20 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
         long got = Math.min(amount, powerBufferCfe);
         if (got <= 0L) return 0L;
 
+        long before = powerBufferCfe;
         powerBufferCfe -= got;
         markDirty();
+
+        // Log only when we drain to 0 or do a noticeable pull.
+        if (isPowerDebugActive() || powerBufferCfe <= 0L || got >= 1000L) {
+            String where = (world != null) ? ("dim=" + world.getRegistryKey().getValue() + ", pos=" + pos) : ("pos=" + pos);
+            debug.log(
+                "extractPowerFromBuffer",
+                where + ": req=" + amount + ", got=" + got
+                    + ", stored " + before + " -> " + powerBufferCfe
+                    + ", cap=" + cap + ", speed=" + speedLevel
+            );
+        }
         return got;
     }
 
@@ -214,13 +274,25 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
         long put = Math.min(amount, missing);
         if (put <= 0L) return 0L;
 
+        long before = powerBufferCfe;
         powerBufferCfe += put;
         markDirty();
+
+        // Log only when we do a noticeable fill.
+        if (isPowerDebugActive() || put >= 1000L || (before == 0L && powerBufferCfe > 0L)) {
+            String where = (world != null) ? ("dim=" + world.getRegistryKey().getValue() + ", pos=" + pos) : ("pos=" + pos);
+            debug.log(
+                "insertPowerToBuffer",
+                where + ": req=" + amount + ", put=" + put
+                    + ", stored " + before + " -> " + powerBufferCfe
+                    + ", cap=" + cap + ", speed=" + speedLevel
+            );
+        }
         return put;
     }
 
     /**
-     * Server tick: charge buffer while paused if a power source exists; otherwise discharge toward 0.
+     * Server tick: charge buffer while paused if a power source exists.
      */
     public static void tick(World world, BlockPos pos, BlockState state, QuarryControllerBlockEntity be) {
         if (world == null || be == null) return;
@@ -238,9 +310,28 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
             : null;
         boolean active = q != null && q.isActive();
 
+        if (be.powerDebugTicks > 0) {
+            be.powerDebugTicks--;
+        }
+
         // While active, the quarry tick path consumes power via platform.extractPowerCfe (network first, then buffer).
         // Avoid additionally charging/discharging here to keep behavior predictable.
-        if (active) return;
+        if (active) {
+            if (be.isPowerDebugActive()) {
+                long cap = be.getPowerBufferCapacityCfe();
+                long stored = be.getPowerBufferStoredCfe();
+                FabricPowerNetworkManager.NetworkInfo info = FabricPowerNetworkManager.measureNetwork(server, controllerLoc);
+                debug.log(
+                    "tick",
+                    "dim=" + sw.getRegistryKey().getValue() + ", pos=" + pos
+                        + ": active=1, speed=" + be.speedLevel
+                        + ", stored=" + stored + ", cap=" + cap
+                        + ", netGen=" + (info != null ? info.producedCfePerTick() : -1)
+                        + ", netStored=" + (info != null ? info.storedCfe() : -1)
+                );
+            }
+            return;
+        }
 
         long cap = be.getPowerBufferCapacityCfe();
         if (cap <= 0L) {
@@ -258,26 +349,39 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
         FabricPowerNetworkManager.NetworkInfo info = FabricPowerNetworkManager.measureNetwork(server, controllerLoc);
         boolean hasSource = info != null && (info.producedCfePerTick() > 0L || info.storedCfe() > 0L);
 
+        if (be.isPowerDebugActive()) {
+            debug.log(
+                "tick",
+                "dim=" + sw.getRegistryKey().getValue() + ", pos=" + pos
+                    + ": active=0, speed=" + be.speedLevel
+                    + ", stored=" + be.getPowerBufferStoredCfe() + ", cap=" + cap
+                    + ", missing=" + Math.max(0L, cap - be.powerBufferCfe)
+                    + ", netGen=" + (info != null ? info.producedCfePerTick() : -1)
+                    + ", netStored=" + (info != null ? info.storedCfe() : -1)
+                    + ", hasSource=" + (hasSource ? 1 : 0)
+            );
+        }
+
         if (hasSource) {
             long missing = cap - be.powerBufferCfe;
             if (missing <= 0L) return;
 
-            // Charge at up to the theoretical per-tick requirement (so the buffer can fill in ~10s).
-            long perTick = requiredCfePerTickForSpeed(be.speedLevel);
-            long want = Math.min(missing, Math.max(0L, perTick));
-            if (want <= 0L) return;
-
-            long got = FabricPowerNetworkManager.extractPowerCfe(server, controllerLoc, want);
+            // Fill the missing buffer from the network (allowed to use stored energy).
+            long got = FabricPowerNetworkManager.extractPowerCfe(server, controllerLoc, missing);
             if (got > 0L) {
+                long before = be.powerBufferCfe;
                 be.powerBufferCfe = Math.min(cap, be.powerBufferCfe + got);
                 be.markDirty();
-            }
-        } else {
-            // No power source detected: discharge to 0 over ~10 seconds.
-            long drainPerTick = Math.max(1L, cap / (long) BUFFER_TICKS);
-            if (be.powerBufferCfe > 0L) {
-                be.powerBufferCfe = Math.max(0L, be.powerBufferCfe - drainPerTick);
-                be.markDirty();
+
+                if (be.isPowerDebugActive()) {
+                    debug.log(
+                        "tick",
+                        "dim=" + sw.getRegistryKey().getValue() + ", pos=" + pos
+                            + ": charge got=" + got
+                            + ", stored " + before + " -> " + be.powerBufferCfe
+                            + ", cap=" + cap + ", speed=" + be.speedLevel
+                    );
+                }
             }
         }
     }
@@ -297,6 +401,12 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
         } else if (silkAugmentStack.isEmpty()) {
             silkAugmentStack = dev.cloudframe.fabric.content.AugmentBooks.silkTouch();
         }
+
+        // Mutual exclusion: silk touch disables fortune.
+        if (silkTouch) {
+            fortuneLevel = 0;
+            fortuneAugmentStack = ItemStack.EMPTY;
+        }
         markDirty();
     }
 
@@ -305,12 +415,62 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
     }
 
     public void setSpeedLevel(int speedLevel) {
+        int oldLevel = this.speedLevel;
+        long oldCap = getPowerBufferCapacityCfe();
+        long oldStored = this.powerBufferCfe;
+
         this.speedLevel = Math.max(0, Math.min(3, speedLevel));
         if (this.speedLevel <= 0) {
             speedAugmentStack = ItemStack.EMPTY;
         } else {
             speedAugmentStack = dev.cloudframe.fabric.content.AugmentBooks.speed(this.speedLevel);
         }
+
+        // Capacity depends on speed tier; clamp stored energy when changing tiers.
+        long cap = getPowerBufferCapacityCfe();
+        if (cap <= 0L) {
+            powerBufferCfe = 0L;
+        } else if (powerBufferCfe > cap) {
+            powerBufferCfe = cap;
+        } else if (powerBufferCfe < 0L) {
+            powerBufferCfe = 0L;
+        }
+
+        // Debug: track speed changes and any unexpected buffer resets.
+        // (Writes to CloudFrame debug.log via DebugFile; no console logging.)
+        if (oldLevel != this.speedLevel) {
+            String where = (world != null) ? ("dim=" + world.getRegistryKey().getValue() + ", pos=" + pos) : ("pos=" + pos);
+            debug.log(
+                "setSpeedLevel",
+                where + ": speed " + oldLevel + " -> " + this.speedLevel
+                    + ", cap " + oldCap + " -> " + cap
+                    + ", stored " + oldStored + " -> " + this.powerBufferCfe
+            );
+
+            // Enable a short debug window around speed tier changes.
+            triggerPowerDebugWindow("speed " + oldLevel + " -> " + this.speedLevel);
+        }
+        markDirty();
+    }
+
+    public int getFortuneLevel() {
+        return fortuneLevel;
+    }
+
+    public void setFortuneLevel(int fortuneLevel) {
+        this.fortuneLevel = Math.max(0, Math.min(3, fortuneLevel));
+        if (this.fortuneLevel <= 0) {
+            fortuneAugmentStack = ItemStack.EMPTY;
+        } else {
+            fortuneAugmentStack = dev.cloudframe.fabric.content.AugmentBooks.fortune(this.fortuneLevel);
+        }
+
+        // Mutual exclusion: fortune disables silk touch.
+        if (this.fortuneLevel > 0) {
+            silkTouch = false;
+            silkAugmentStack = ItemStack.EMPTY;
+        }
+
         markDirty();
     }
 
@@ -395,9 +555,12 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
     @Override
     protected void writeData(WriteView view) {
         super.writeData(view);
-        view.putBoolean("SilkTouch", silkTouch);
-        view.putInt("SpeedLevel", speedLevel);
         view.putBoolean("OutputRoundRobin", outputRoundRobin);
+
+        view.putBoolean("SilkTouch", silkTouch);
+        view.putInt("SpeedLevel", Math.max(0, Math.min(3, speedLevel)));
+        view.putInt("FortuneLevel", Math.max(0, Math.min(3, fortuneLevel)));
+
         view.putInt("OwnerMsh", ownerMsh);
         view.putInt("OwnerMsl", ownerMsl);
         view.putInt("OwnerLsh", ownerLsh);
@@ -416,10 +579,17 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
 
         silkTouch = view.getBoolean("SilkTouch", false);
         speedLevel = Math.max(0, Math.min(3, view.getInt("SpeedLevel", 0)));
+        fortuneLevel = Math.max(0, Math.min(3, view.getInt("FortuneLevel", 0)));
+
+        // Mutual exclusion: if both were persisted somehow, prefer silk touch.
+        if (silkTouch && fortuneLevel > 0) {
+            fortuneLevel = 0;
+        }
 
         // Rebuild stable slot stacks from persisted flags.
         silkAugmentStack = silkTouch ? dev.cloudframe.fabric.content.AugmentBooks.silkTouch() : ItemStack.EMPTY;
         speedAugmentStack = speedLevel > 0 ? dev.cloudframe.fabric.content.AugmentBooks.speed(speedLevel) : ItemStack.EMPTY;
+        fortuneAugmentStack = fortuneLevel > 0 ? dev.cloudframe.fabric.content.AugmentBooks.fortune(fortuneLevel) : ItemStack.EMPTY;
 
         ownerMsh = view.getInt("OwnerMsh", 0);
         ownerMsl = view.getInt("OwnerMsl", 0);

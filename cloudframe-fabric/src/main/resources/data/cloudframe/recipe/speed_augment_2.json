@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " G ",
+    " A ",
+    "   "
+  ],
+  "key": {
+    "G": "minecraft:gold_ingot",
+    "A": "cloudframe:speed_augment_1"
+  },
+  "result": {
+    "count": 1,
+    "id": "cloudframe:speed_augment_2"
+  }
+}

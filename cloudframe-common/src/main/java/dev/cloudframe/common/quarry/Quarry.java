@@ -75,6 +75,7 @@ public class Quarry {
     private boolean outputRoundRobin = true;
     private boolean silkTouchAugment = false;
     private int speedAugmentLevel = 0;
+    private int fortuneAugmentLevel = 0;
 
     private int currentX;
     private int currentY;
@@ -505,7 +506,8 @@ public class Quarry {
         }
 
         if (mineProgress >= 1.0f) {
-            List<Object> drops = platform.getDrops(currentLoc, silkTouchAugment);
+            int fortune = silkTouchAugment ? 0 : Math.max(0, Math.min(3, fortuneAugmentLevel));
+            List<Object> drops = platform.getDrops(currentLoc, silkTouchAugment, fortune);
             if (drops != null) {
                 for (Object drop : drops) {
                     if (drop == null) continue;
@@ -557,6 +559,8 @@ public class Quarry {
     public void setSilkTouchAugment(boolean b) { this.silkTouchAugment = b; }
     public int getSpeedAugmentLevel() { return speedAugmentLevel; }
     public void setSpeedAugmentLevel(int lvl) { this.speedAugmentLevel = Math.max(0, Math.min(3, lvl)); }
+    public int getFortuneAugmentLevel() { return fortuneAugmentLevel; }
+    public void setFortuneAugmentLevel(int lvl) { this.fortuneAugmentLevel = Math.max(0, Math.min(3, lvl)); }
     public int[] getBlocksPerLayer() { return new int[0]; }
     public boolean[] getEmptyLayers() { return new boolean[0]; }
     public boolean isMetadataReady() { return false; }

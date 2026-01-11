@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " C ",
+    " B ",
+    "   "
+  ],
+  "key": {
+    "C": "minecraft:copper_block",
+    "B": "minecraft:blue_dye"
+  },
+  "result": {
+    "count": 8,
+    "id": "cloudframe:cloud_pipe"
+  }
+}

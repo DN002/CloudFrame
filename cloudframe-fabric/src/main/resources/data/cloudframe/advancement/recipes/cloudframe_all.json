@@ -1,0 +1,57 @@
+{
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "cloudframe:wrench"
+    },
+    "title": {
+      "translate": "advancement.cloudframe.all.title"
+    },
+    "description": {
+      "translate": "advancement.cloudframe.all.desc"
+    },
+    "background": "minecraft:textures/gui/advancements/backgrounds/adventure.png",
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "has_wrench": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "cloudframe:wrench"
+          }
+        ]
+      }
+    }
+  },
+  "requirements": [
+    [
+      "has_wrench"
+    ]
+  ],
+  "rewards": {
+    "recipes": [
+      "cloudframe:cloud_pipe",
+      "cloudframe:cloud_cable",
+      "cloudframe:stratus_panel",
+      "cloudframe:cloud_turbine",
+      "cloudframe:cloud_cell",
+      "cloudframe:quarry_controller",
+      "cloudframe:marker_wand",
+      "cloudframe:wrench",
+      "cloudframe:pipe_filter",
+      "cloudframe:trash_can",
+      "cloudframe:silk_touch_augment",
+      "cloudframe:speed_augment_1",
+      "cloudframe:speed_augment_2",
+      "cloudframe:speed_augment_3",
+      "cloudframe:fortune_augment_1",
+      "cloudframe:fortune_augment_2",
+      "cloudframe:fortune_augment_3"
+    ]
+  }
+}

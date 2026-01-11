@@ -53,7 +53,8 @@ public class Database {
                     frameMinX INTEGER,
                     frameMinZ INTEGER,
                     frameMaxX INTEGER,
-                    frameMaxZ INTEGER
+                    frameMaxZ INTEGER,
+                    fortuneLevel INTEGER DEFAULT 0
                 );
             """);
 
@@ -73,6 +74,12 @@ public class Database {
 
             try {
                 stmt.executeUpdate("ALTER TABLE quarries ADD COLUMN speedLevel INTEGER DEFAULT 0");
+            } catch (SQLException ignored) {
+                // Column already exists (or table is new).
+            }
+
+            try {
+                stmt.executeUpdate("ALTER TABLE quarries ADD COLUMN fortuneLevel INTEGER DEFAULT 0");
             } catch (SQLException ignored) {
                 // Column already exists (or table is new).
             }
@@ -218,6 +225,7 @@ public class Database {
                     yaw INTEGER DEFAULT 0,
                     silkTouch INTEGER DEFAULT 0,
                     speedLevel INTEGER DEFAULT 0,
+                    fortuneLevel INTEGER DEFAULT 0,
                     PRIMARY KEY (world, x, y, z)
                 );
             """);
@@ -231,6 +239,12 @@ public class Database {
 
             try {
                 stmt.executeUpdate("ALTER TABLE unregistered_controllers ADD COLUMN speedLevel INTEGER DEFAULT 0");
+            } catch (SQLException ignored) {
+                // Column already exists.
+            }
+
+            try {
+                stmt.executeUpdate("ALTER TABLE unregistered_controllers ADD COLUMN fortuneLevel INTEGER DEFAULT 0");
             } catch (SQLException ignored) {
                 // Column already exists.
             }

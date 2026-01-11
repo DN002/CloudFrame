@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " D ",
+    " A ",
+    "   "
+  ],
+  "key": {
+    "D": "minecraft:diamond",
+    "A": "cloudframe:fortune_augment_2"
+  },
+  "result": {
+    "count": 1,
+    "id": "cloudframe:fortune_augment_3"
+  }
+}

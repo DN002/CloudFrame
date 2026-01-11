@@ -23,6 +23,15 @@ public interface QuarryPlatform {
     void setChunkForced(Object world, int chunkX, int chunkZ, boolean forced);
     boolean isMineable(Object loc);
     List<Object> getDrops(Object loc, boolean silkTouch);
+
+    /**
+     * Fortune-aware drops.
+     *
+     * <p>Default behavior ignores fortune and delegates to the legacy 2-arg method.</p>
+     */
+    default List<Object> getDrops(Object loc, boolean silkTouch, int fortuneLevel) {
+        return getDrops(loc, silkTouch);
+    }
     void setBlockAir(Object loc);
     void playBreakEffects(Object loc);
     void sendBlockCrack(Object loc, float progress01);

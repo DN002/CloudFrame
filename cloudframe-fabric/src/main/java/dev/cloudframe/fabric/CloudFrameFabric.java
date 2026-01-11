@@ -26,10 +26,12 @@ import net.fabricmc.api.EnvType;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.item.ItemStack;
+import net.minecraft.recipe.RecipeEntry;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
@@ -41,6 +43,8 @@ import net.minecraft.server.MinecraftServer;
 
 import java.nio.file.Path;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.Collection;
 
 /**
  * CloudFrame Fabric Mod - Multi-platform version
@@ -96,6 +100,24 @@ public class CloudFrameFabric implements ModInitializer {
             CloudFrameContent.registerAll();
             debug.log("onInitialize", "Content registered successfully (blocks/items + block entities + screen handlers)");
             debug.log("onInitialize", "Content registered");
+            // Log loaded recipes for diagnostics (server side)
+            try {
+                if (server != null) {
+                    var recipeManager = server.getRecipeManager();
+                    int cloudframeCount = 0;
+                    for (var entry : recipeManager.values()) {
+                        var id = entry.id();
+                        if (id != null && id.getValue().getNamespace().equals("cloudframe")) {
+                            cloudframeCount++;
+                        }
+                    }
+                    debug.log("onInitialize", "Loaded CloudFrame recipes: " + cloudframeCount);
+                } else {
+                    debug.log("onInitialize", "Server not initialized, cannot enumerate recipes yet.");
+                }
+            } catch (Throwable t) {
+                debug.log("onInitialize", "Could not enumerate recipes: " + t);
+            }
         } catch (Exception ex) {
             debug.log("onInitialize", "FATAL: Failed to register content: " + ex.getMessage());
             LOGGER.error("[CloudFrame] Failed to register content!", ex);
@@ -134,6 +156,16 @@ public class CloudFrameFabric implements ModInitializer {
         // Register server lifecycle events
         ServerLifecycleEvents.SERVER_STARTED.register(this::onServerStarted);
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
+
+        // Ensure recipes are visible in the recipe book by unlocking them for players on join.
+        // (Advancement-based unlocks are brittle and can silently fail if any JSON is invalid.)
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, srv) -> {
+            try {
+                unlockCloudFrameRecipesForPlayer(handler.player, srv);
+            } catch (Throwable t) {
+                if (debug != null) debug.log("recipes", "Failed to unlock recipes on join: " + t);
+            }
+        });
 
         // Register tick event for packet/quarry updates
         ServerTickEvents.END_SERVER_TICK.register(this::onServerTick);
@@ -230,6 +262,14 @@ public class CloudFrameFabric implements ModInitializer {
         debug.log("onServerStarted", "===== SERVER STARTED CALLBACK FIRED =====");
         debug.log("onServerStarted", "Server started, initializing managers...");
 
+        // Recipe diagnostics + warm-up: confirm recipes are present on the server.
+        try {
+            int cloudframeCount = countCloudFrameRecipes(server);
+            debug.log("recipes", "Server recipe manager contains CloudFrame recipes: " + cloudframeCount);
+        } catch (Throwable t) {
+            debug.log("recipes", "Could not count recipes on server start: " + t);
+        }
+
         // Fallback: if CommandRegistrationCallback didn't register, do it now
         if (!commandsRegistered) {
             debug.log("commands", "CommandRegistrationCallback did not register commands, attempting fallback registration");
@@ -295,6 +335,57 @@ public class CloudFrameFabric implements ModInitializer {
         debug.log("onServerStarted", "Managers initialized and data loaded.");
     }
 
+    private static int countCloudFrameRecipes(MinecraftServer server) {
+        if (server == null) return 0;
+        int cloudframeCount = 0;
+        for (var entry : server.getRecipeManager().values()) {
+            var id = entry.id();
+            if (id != null && "cloudframe".equals(id.getValue().getNamespace())) {
+                cloudframeCount++;
+            }
+        }
+        return cloudframeCount;
+    }
+
+    private static Collection<RecipeEntry<?>> getCloudFrameRecipeEntries(MinecraftServer server) {
+        ArrayList<RecipeEntry<?>> out = new ArrayList<>();
+        if (server == null) return out;
+        for (var entry : server.getRecipeManager().values()) {
+            var id = entry.id();
+            if (id != null && "cloudframe".equals(id.getValue().getNamespace())) {
+                out.add(entry);
+            }
+        }
+        return out;
+    }
+
+    private static void unlockCloudFrameRecipesForPlayer(ServerPlayerEntity player, MinecraftServer server) {
+        if (player == null || server == null) return;
+
+        Collection<RecipeEntry<?>> recipes = getCloudFrameRecipeEntries(server);
+        if (recipes.isEmpty()) return;
+
+        // Method signatures differ across MC versions; use reflection to stay resilient.
+        try {
+            // 1.21+ commonly: unlockRecipes(Collection<RecipeEntry<?>>)
+            var m = ServerPlayerEntity.class.getMethod("unlockRecipes", Collection.class);
+            m.invoke(player, recipes);
+            return;
+        } catch (NoSuchMethodException ignored) {
+            // fall through
+        } catch (Throwable t) {
+            // fall through to alternate signature
+        }
+
+        try {
+            RecipeEntry<?>[] arr = recipes.toArray(new RecipeEntry[0]);
+            var m = ServerPlayerEntity.class.getMethod("unlockRecipes", RecipeEntry[].class);
+            m.invoke(player, (Object) arr);
+        } catch (Throwable ignored) {
+            // If this fails too, recipes just won't show in the recipe book.
+        }
+    }
+
     private void migrateQuarryVerticalRegionsIfNeeded(MinecraftServer server) {
         if (quarryManager == null || quarryPlatform == null || server == null) return;
         boolean changed = false;
@@ -347,6 +438,7 @@ public class CloudFrameFabric implements ModInitializer {
             // Preserve settings.
             migrated.setSilkTouchAugment(q.hasSilkTouchAugment());
             migrated.setSpeedAugmentLevel(q.getSpeedAugmentLevel());
+            migrated.setFortuneAugmentLevel(q.getFortuneAugmentLevel());
             migrated.setOutputRoundRobin(q.isOutputRoundRobin());
 
             // Preserve visual frame bounds if present.

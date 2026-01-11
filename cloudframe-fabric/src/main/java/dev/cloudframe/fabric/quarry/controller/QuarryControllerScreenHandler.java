@@ -20,8 +20,12 @@ import net.minecraft.util.ItemScatterer;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
 import net.minecraft.server.MinecraftServer;
+import dev.cloudframe.common.util.Debug;
+import dev.cloudframe.common.util.DebugManager;
 
 public class QuarryControllerScreenHandler extends ScreenHandler {
+
+    private static final Debug debug = DebugManager.get(QuarryControllerScreenHandler.class);
 
     private static final int ENERGY_PER_BLOCK_CFE = 480;
 
@@ -31,15 +35,17 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
     private final BlockPos controllerPos;
     private final QuarryControllerBlockEntity be;
 
-    private static final int AUGMENT_SLOTS = 2;
+    private static final int AUGMENT_SLOTS = 3;
     private static final int SILK_SLOT_INDEX = 0;
     private static final int SPEED_SLOT_INDEX = 1;
+    private static final int FORTUNE_SLOT_INDEX = 2;
 
     private final Inventory augmentInventory;
 
     // Properties (ints only):
     // 0 silkInstalled (0/1)
     // 1 speedLevel (0-3)
+    // 30 fortuneLevel (0-3)
     // 2 quarryRegistered (0/1)
     // 3 quarryActive (0/1)
     // 4 quarryState (0=unregistered,1=paused,2=mining,3=scanning,4=metadata)
@@ -59,8 +65,12 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
     // 22 powerBlocked (0/1)
     // 23 powerRequiredCfePerTick (int, clamped)
     // 24 powerReceivedCfePerTick (int, clamped)
-    // 28 powerBufferStoredCfe (int, clamped)
-    // 29 powerBufferCapacityCfe (int, clamped)
+    // NOTE: ScreenHandler property sync values are effectively 16-bit on the wire.
+    // To safely sync buffer values above 32767 (e.g., 57600), we split into 2x 16-bit parts.
+    // 28 powerBufferStoredLoU16
+    // 29 powerBufferStoredHiU16
+    // 31 powerBufferCapacityLoU16
+    // 32 powerBufferCapacityHiU16
     // 25 controllerX
     // 26 controllerY
     // 27 controllerZ
@@ -75,7 +85,7 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
         this.controllerPos = BlockPos.ORIGIN;
         this.be = null;
         this.augmentInventory = new SimpleInventory(AUGMENT_SLOTS);
-        this.properties = new ArrayPropertyDelegate(30);
+        this.properties = new ArrayPropertyDelegate(33);
         addProperties(this.properties);
 
         addAugmentSlots();
@@ -154,6 +164,7 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
                 return switch (index) {
                     case 0 -> be.isSilkTouch() ? 1 : 0;
                     case 1 -> Math.max(0, Math.min(3, be.getSpeedLevel()));
+                    case 30 -> Math.max(0, Math.min(3, be.getFortuneLevel()));
                     case 2 -> q != null ? 1 : 0;
                     case 3 -> (q != null && q.isActive()) ? 1 : 0;
                     case 4 -> state;
@@ -218,12 +229,22 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
                     case 28 -> {
                         if (be == null) yield 0;
                         long v = Math.max(0L, be.getPowerBufferStoredCfe());
-                        yield v > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) v;
+                        yield (int) (v & 0xFFFFL);
                     }
                     case 29 -> {
                         if (be == null) yield 0;
+                        long v = Math.max(0L, be.getPowerBufferStoredCfe());
+                        yield (int) ((v >>> 16) & 0xFFFFL);
+                    }
+                    case 31 -> {
+                        if (be == null) yield 0;
                         long v = Math.max(0L, be.getPowerBufferCapacityCfe());
-                        yield v > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) v;
+                        yield (int) (v & 0xFFFFL);
+                    }
+                    case 32 -> {
+                        if (be == null) yield 0;
+                        long v = Math.max(0L, be.getPowerBufferCapacityCfe());
+                        yield (int) ((v >>> 16) & 0xFFFFL);
                     }
                     case 25 -> controllerPos.getX();
                     case 26 -> controllerPos.getY();
@@ -243,7 +264,7 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
 
             @Override
             public int size() {
-                return 30;
+                return 33;
             }
         };
         addProperties(this.properties);
@@ -273,9 +294,12 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
 
     private void addAugmentSlots() {
         // Top row slots: match the client screen layout (generic_54).
-        // Col 2 = silk, col 3 = speed.
-        this.addSlot(new AugmentSlot(augmentInventory, SILK_SLOT_INDEX, 8 + 2 * 18, 18));
-        this.addSlot(new AugmentSlot(augmentInventory, SPEED_SLOT_INDEX, 8 + 3 * 18, 18));
+        // Row 1 (second row): left side.
+        // Col 0 = silk, col 1 = speed, col 2 = fortune.
+        int y = 18 + 1 * 18;
+        this.addSlot(new AugmentSlot(augmentInventory, SILK_SLOT_INDEX, 8 + 0 * 18, y));
+        this.addSlot(new AugmentSlot(augmentInventory, SPEED_SLOT_INDEX, 8 + 1 * 18, y));
+        this.addSlot(new AugmentSlot(augmentInventory, FORTUNE_SLOT_INDEX, 8 + 2 * 18, y));
     }
 
     private void addPlayerSlots(PlayerInventory inv) {
@@ -296,6 +320,10 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
 
     public int getSpeedLevel() {
         return properties.get(1);
+    }
+
+    public int getFortuneLevel() {
+        return properties.get(30);
     }
 
     public boolean hasRegisteredQuarry() {
@@ -382,11 +410,15 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
     }
 
     public int getPowerBufferStoredCfe() {
-        return properties.get(28);
+        int lo = properties.get(28) & 0xFFFF;
+        int hi = properties.get(29) & 0xFFFF;
+        return (hi << 16) | lo;
     }
 
     public int getPowerBufferCapacityCfe() {
-        return properties.get(29);
+        int lo = properties.get(31) & 0xFFFF;
+        int hi = properties.get(32) & 0xFFFF;
+        return (hi << 16) | lo;
     }
 
     public java.util.UUID getOwnerUuid() {
@@ -525,6 +557,11 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
                     ItemScatterer.spawn(sw, controllerPos.getX() + 0.5, controllerPos.getY() + 0.5, controllerPos.getZ() + 0.5, speed);
                 }
 
+                ItemStack fortune = augmentInventory.removeStack(FORTUNE_SLOT_INDEX);
+                if (!fortune.isEmpty()) {
+                    ItemScatterer.spawn(sw, controllerPos.getX() + 0.5, controllerPos.getY() + 0.5, controllerPos.getZ() + 0.5, fortune);
+                }
+
                 ItemScatterer.spawn(sw, controllerPos.getX() + 0.5, controllerPos.getY() + 0.5, controllerPos.getZ() + 0.5,
                     new ItemStack(CloudFrameContent.QUARRY_CONTROLLER, 1));
 
@@ -557,6 +594,40 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
     }
 
     @Override
+    public void sendContentUpdates() {
+        // Server-side only: confirm what values are being sent to the client.
+        // This helps diagnose UI showing 0 buffer while the BE tick shows it full.
+        if (be != null
+            && be.getWorld() != null
+            && !be.getWorld().isClient()
+            && be.isPowerDebugActive()) {
+
+            int propStored = 0;
+            int propCap = 0;
+            try {
+                propStored = Math.max(0, getPowerBufferStoredCfe());
+                propCap = Math.max(0, getPowerBufferCapacityCfe());
+            } catch (Throwable t) {
+                // ignore
+            }
+
+            debug.log(
+                "sendContentUpdates",
+                "syncId=" + this.syncId
+                    + ", dim=" + be.getWorld().getRegistryKey().getValue()
+                    + ", pos=" + controllerPos
+                    + ", propStored=" + propStored
+                    + ", propCap=" + propCap
+                    + ", beStored=" + be.getPowerBufferStoredCfe()
+                    + ", beCap=" + be.getPowerBufferCapacityCfe()
+                    + ", speed=" + be.getSpeedLevel()
+            );
+        }
+
+        super.sendContentUpdates();
+    }
+
+    @Override
     public ItemStack quickMove(PlayerEntity player, int slot) {
         Slot clicked = this.slots.get(slot);
         if (clicked == null || !clicked.hasStack()) return ItemStack.EMPTY;
@@ -565,33 +636,65 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
         ItemStack copy = original.copy();
 
         // From augment slots -> player inventory
+        // IMPORTANT: do a real removal (takeStack/removeStack) so the BE clears its augment flags.
+        // If we only decrement the ItemStack count, the BE's boolean/int state can get out of sync.
         if (slot < AUGMENT_SLOTS) {
-            if (!this.insertItem(original, AUGMENT_SLOTS, this.slots.size(), true)) {
+            ItemStack removed = clicked.takeStack(1);
+            if (removed.isEmpty()) return ItemStack.EMPTY;
+
+            // Move into player inventory/hotbar range.
+            if (!this.insertItem(removed, AUGMENT_SLOTS, this.slots.size(), true)) {
+                // Restore to the slot if the player inventory is full.
+                clicked.setStack(removed);
+                clicked.markDirty();
+                syncAugmentsToQuarryIfPresent();
                 return ItemStack.EMPTY;
             }
+
             clicked.markDirty();
             syncAugmentsToQuarryIfPresent();
             return copy;
         }
 
         // From player inventory -> appropriate augment slot
-        if (dev.cloudframe.fabric.content.AugmentBooks.isSilkTouch(original)
-            || original.getItem() instanceof dev.cloudframe.fabric.content.augments.SilkTouchAugmentItem) {
+        boolean isSilk = dev.cloudframe.fabric.content.AugmentBooks.isSilkTouch(original)
+            || original.getItem() instanceof dev.cloudframe.fabric.content.augments.SilkTouchAugmentItem;
+
+        int speedTier = dev.cloudframe.fabric.content.AugmentBooks.speedTier(original);
+        if (speedTier <= 0 && original.getItem() instanceof dev.cloudframe.fabric.content.augments.SpeedAugmentItem speed) {
+            speedTier = speed.tier();
+        }
+        boolean isSpeed = speedTier > 0;
+
+        int fortuneTier = dev.cloudframe.fabric.content.AugmentBooks.fortuneTier(original);
+        if (fortuneTier <= 0 && original.getItem() instanceof dev.cloudframe.fabric.content.augments.FortuneAugmentItem fortune) {
+            fortuneTier = fortune.tier();
+        }
+        boolean isFortune = fortuneTier > 0;
+
+        if (isSilk) {
+            if (be != null && be.getFortuneLevel() > 0) {
+                player.sendMessage(Text.literal("Cannot install Silk Touch while Fortune is installed").formatted(net.minecraft.util.Formatting.RED), false);
+                return ItemStack.EMPTY;
+            }
             if (!this.insertItem(original, SILK_SLOT_INDEX, SILK_SLOT_INDEX + 1, false)) {
                 return ItemStack.EMPTY;
             }
-        } else {
-            int tier = dev.cloudframe.fabric.content.AugmentBooks.speedTier(original);
-            if (tier <= 0 && original.getItem() instanceof dev.cloudframe.fabric.content.augments.SpeedAugmentItem speed) {
-                tier = speed.tier();
-            }
-            if (tier > 0) {
-                if (!this.insertItem(original, SPEED_SLOT_INDEX, SPEED_SLOT_INDEX + 1, false)) {
-                    return ItemStack.EMPTY;
-                }
-            } else {
+        } else if (isSpeed) {
+            // Speed augments are compatible with both Silk Touch and Fortune.
+            if (!this.insertItem(original, SPEED_SLOT_INDEX, SPEED_SLOT_INDEX + 1, false)) {
                 return ItemStack.EMPTY;
             }
+        } else if (isFortune) {
+            if (be != null && be.isSilkTouch()) {
+                player.sendMessage(Text.literal("Cannot install Fortune while Silk Touch is installed").formatted(net.minecraft.util.Formatting.RED), false);
+                return ItemStack.EMPTY;
+            }
+            if (!this.insertItem(original, FORTUNE_SLOT_INDEX, FORTUNE_SLOT_INDEX + 1, false)) {
+                return ItemStack.EMPTY;
+            }
+        } else {
+            return ItemStack.EMPTY;
         }
 
         if (original.isEmpty()) {
@@ -606,6 +709,35 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
 
     @Override
     public void onSlotClick(int slotIndex, int button, SlotActionType actionType, PlayerEntity player) {
+        // Mutual exclusion UX: block inserting a Silk augment when Fortune is installed, and vice versa.
+        // (Server-side only; client prediction may still allow the click, but the server will reject it.)
+        if (be != null
+            && slotIndex >= 0
+            && slotIndex < AUGMENT_SLOTS
+            && (actionType == SlotActionType.PICKUP || actionType == SlotActionType.SWAP)
+            && !this.getCursorStack().isEmpty()) {
+
+            ItemStack cursor = this.getCursorStack();
+            boolean cursorSilk = dev.cloudframe.fabric.content.AugmentBooks.isSilkTouch(cursor)
+                || cursor.getItem() instanceof dev.cloudframe.fabric.content.augments.SilkTouchAugmentItem;
+
+            int cursorFortuneTier = dev.cloudframe.fabric.content.AugmentBooks.fortuneTier(cursor);
+            if (cursorFortuneTier <= 0 && cursor.getItem() instanceof dev.cloudframe.fabric.content.augments.FortuneAugmentItem fortune) {
+                cursorFortuneTier = fortune.tier();
+            }
+            boolean cursorFortune = cursorFortuneTier > 0;
+
+            if (slotIndex == SILK_SLOT_INDEX && cursorSilk && be.getFortuneLevel() > 0) {
+                player.sendMessage(Text.literal("Cannot install Silk Touch while Fortune is installed").formatted(net.minecraft.util.Formatting.RED), false);
+                return;
+            }
+
+            if (slotIndex == FORTUNE_SLOT_INDEX && cursorFortune && be.isSilkTouch()) {
+                player.sendMessage(Text.literal("Cannot install Fortune while Silk Touch is installed").formatted(net.minecraft.util.Formatting.RED), false);
+                return;
+            }
+        }
+
         // UX: simple left-click on an installed augment slot returns it to inventory.
         if (be != null
             && slotIndex >= 0
@@ -644,6 +776,7 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
 
         q.setSilkTouchAugment(be.isSilkTouch());
         q.setSpeedAugmentLevel(be.getSpeedLevel());
+        q.setFortuneAugmentLevel(be.getFortuneLevel());
         inst.getQuarryManager().saveQuarry(q);
     }
 
@@ -662,6 +795,7 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
             if (stack == null || stack.isEmpty()) return false;
 
             if (this.getIndex() == SILK_SLOT_INDEX) {
+                if (be != null && be.getFortuneLevel() > 0) return false;
                 return dev.cloudframe.fabric.content.AugmentBooks.isSilkTouch(stack)
                     || stack.getItem() instanceof dev.cloudframe.fabric.content.augments.SilkTouchAugmentItem;
             }
@@ -670,6 +804,15 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
                 int tier = dev.cloudframe.fabric.content.AugmentBooks.speedTier(stack);
                 if (tier <= 0 && stack.getItem() instanceof dev.cloudframe.fabric.content.augments.SpeedAugmentItem speed) {
                     tier = speed.tier();
+                }
+                return tier > 0;
+            }
+
+            if (this.getIndex() == FORTUNE_SLOT_INDEX) {
+                if (be != null && be.isSilkTouch()) return false;
+                int tier = dev.cloudframe.fabric.content.AugmentBooks.fortuneTier(stack);
+                if (tier <= 0 && stack.getItem() instanceof dev.cloudframe.fabric.content.augments.FortuneAugmentItem fortune) {
+                    tier = fortune.tier();
                 }
                 return tier > 0;
             }

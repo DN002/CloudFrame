@@ -164,6 +164,12 @@ public class TubeBlock extends Block {
         if (CloudFrameContent.getPipeFilter() != null && inHand.isOf(CloudFrameContent.getPipeFilter())) {
             // Only allow attaching to a real inventory connection.
             BlockPos neighbor = pos.offset(side);
+            BlockState neighborState = world.getBlockState(neighbor);
+            if (CloudFrameContent.getQuarryControllerBlock() != null
+                && neighborState.isOf(CloudFrameContent.getQuarryControllerBlock())) {
+                serverPlayer.sendMessage(Text.literal("§cPipe filters cannot be installed on sides facing the Quarry Controller. §7Install filters on the output end near chests/trash instead."), true);
+                return ActionResult.SUCCESS;
+            }
             BlockEntity be = world.getBlockEntity(neighbor);
             if (!(be instanceof Inventory)) {
                 serverPlayer.sendMessage(Text.literal("§7No inventory on that side."), true);

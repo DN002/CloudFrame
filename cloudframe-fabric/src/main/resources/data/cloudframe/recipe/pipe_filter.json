@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "cloudframe:cloud_pipe",
+    "minecraft:paper"
+  ],
+  "result": {
+    "count": 1,
+    "id": "cloudframe:pipe_filter"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "parent": "minecraft:recipes/root",
+  "criteria": {
+    "has_paper": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          { "items": ["minecraft:paper"] }
+        ]
+      }
+    }
+  },
+  "rewards": {
+    "recipes": ["cloudframe:pipe_filter"]
+  }
+}

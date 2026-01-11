@@ -23,8 +23,11 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
     private static final int SLOT_ROW1_Y = 18 + 1 * 18;
     private static final int SLOT_REDSTONE_TORCH_X = 8 + 0 * 18;
     private static final int SLOT_LEVER_X = 8 + 1 * 18;
-    private static final int SLOT_SILK_X = 8 + 2 * 18;
-    private static final int SLOT_SPEED_X = 8 + 3 * 18;
+    // Augment slots are on row 1 (second row), left side.
+    private static final int SLOT_SILK_X = 8 + 0 * 18;
+    private static final int SLOT_SPEED_X = 8 + 1 * 18;
+    private static final int SLOT_FORTUNE_X = 8 + 2 * 18;
+    // Barrier/remove button: centered.
     private static final int SLOT_BARRIER_X = 8 + 4 * 18;
     private static final int SLOT_POWER_X = 8 + 7 * 18;
     private static final int SLOT_HOPPER_X = 8 + 8 * 18;
@@ -52,6 +55,14 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
     private double lastNonZeroTargetUsingCfePerTick = 0.0;
     private boolean lastPowerActive = false;
     private int lastQuarryState = Integer.MIN_VALUE;
+
+    // Smooth buffer display (CFE) so capacity changes don't look like instant teleporting.
+    private int animatedPowerBufferStoredCfe = 0;
+    private int lastSeenPowerBufferStoredCfe = 0;
+    private int lastSeenPowerBufferCapCfe = 0;
+
+    // ~10k CFE/sec at 20 TPS: 24k -> 57.6k takes ~3.4s.
+    private static final int POWER_BUFFER_RAMP_CFE_PER_TICK = 500;
 
     private static final class CachedPowerAnim {
         final double fillRatio;
@@ -105,6 +116,9 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
             lastNonZeroTargetUsingCfePerTick = 0.0;
             lastPowerActive = false;
             lastQuarryState = 0;
+            animatedPowerBufferStoredCfe = 0;
+            lastSeenPowerBufferStoredCfe = 0;
+            lastSeenPowerBufferCapCfe = 0;
             return;
         }
 
@@ -112,11 +126,46 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
         int bufferCap = Math.max(0, handler.getPowerBufferCapacityCfe());
         int bufferStored = Math.max(0, handler.getPowerBufferStoredCfe());
 
+        // Defensive UI fallback: if capacity is reported as 0, derive it from speed tier.
+        // This avoids a 0/0 display glitch that can happen during slot sync.
+        if (bufferCap <= 0) {
+            bufferCap = fallbackBufferCapacityForSpeed(handler.getSpeedLevel());
+        }
+
+        // Smooth the displayed stored buffer so it ramps up after tier changes.
+        // Special case: if cap increases and server reports "full" immediately, start from the
+        // previous stored value so the player sees it filling.
+        if (lastSeenPowerBufferCapCfe > 0
+            && bufferCap > lastSeenPowerBufferCapCfe
+            && bufferStored >= bufferCap
+            && lastSeenPowerBufferStoredCfe > 0
+            && animatedPowerBufferStoredCfe <= 0) {
+            animatedPowerBufferStoredCfe = Math.min(lastSeenPowerBufferStoredCfe, bufferCap);
+        }
+
+        if (animatedPowerBufferStoredCfe <= 0) {
+            animatedPowerBufferStoredCfe = Math.min(bufferStored, bufferCap);
+        }
+
+        if (bufferStored > animatedPowerBufferStoredCfe) {
+            int delta = bufferStored - animatedPowerBufferStoredCfe;
+            animatedPowerBufferStoredCfe += Math.min(delta, POWER_BUFFER_RAMP_CFE_PER_TICK);
+        } else {
+            // Snap down immediately (drains should feel responsive).
+            animatedPowerBufferStoredCfe = bufferStored;
+        }
+
+        if (animatedPowerBufferStoredCfe < 0) animatedPowerBufferStoredCfe = 0;
+        if (bufferCap > 0 && animatedPowerBufferStoredCfe > bufferCap) animatedPowerBufferStoredCfe = bufferCap;
+
+        lastSeenPowerBufferStoredCfe = bufferStored;
+        lastSeenPowerBufferCapCfe = bufferCap;
+
         boolean activeNow = handler.isQuarryActive();
 
         double targetFill = 0.0;
         if (bufferCap > 0) {
-            targetFill = Math.min(1.0, Math.max(0.0, (double) bufferStored / (double) bufferCap));
+            targetFill = Math.min(1.0, Math.max(0.0, (double) animatedPowerBufferStoredCfe / (double) bufferCap));
         }
 
         // Display real server values immediately (no slow ramp).
@@ -308,12 +357,34 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
 
     private static boolean isWidgetSlot(int row, int col) {
         if (row == 0) {
-            return col == 0 || col == 1 || col == 2 || col == 3 || col == 4 || col == 7 || col == 8;
+            // Row 0: redstone + lever + centered barrier + power + hopper.
+            return col == 0 || col == 1 || col == 4 || col == 7 || col == 8;
         }
         if (row == 1) {
-            return col == 6 || col == 7 || col == 8;
+            // Row 1: augment slots on left + chunk widgets on right.
+            return col == 0 || col == 1 || col == 2 || col == 6 || col == 7 || col == 8;
         }
         return false;
+    }
+
+    private static int fallbackBufferCapacityForSpeed(int speedLevel) {
+        int tier = Math.max(0, Math.min(3, speedLevel));
+        int ticksPerBlock;
+        switch (tier) {
+            case 1 -> ticksPerBlock = 8;
+            case 2 -> ticksPerBlock = 6;
+            case 3 -> ticksPerBlock = 5;
+            default -> ticksPerBlock = 12;
+        }
+        if (ticksPerBlock <= 0) ticksPerBlock = 1;
+
+        // Matches QuarryControllerBlockEntity: 480 CFE per block, buffer holds ~30s.
+        int energyPerBlock = 480;
+        int bufferTicks = 30 * 20;
+        int perTick = (energyPerBlock + ticksPerBlock - 1) / ticksPerBlock;
+        long cap = (long) Math.max(0, perTick) * (long) bufferTicks;
+        if (cap <= 0) return 0;
+        return cap > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) cap;
     }
 
     private static String formatEtaMinutesSeconds(int seconds) {
@@ -381,10 +452,14 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
 
                 int stored = Math.max(0, handler.getPowerBufferStoredCfe());
                 int cap = Math.max(0, handler.getPowerBufferCapacityCfe());
+                if (cap <= 0) {
+                    cap = fallbackBufferCapacityForSpeed(handler.getSpeedLevel());
+                }
 
                 int animatedUsing = Math.max(0, (int) Math.round(animatedPowerUsingCfePerTick));
 
-                lines.add(Text.literal("Buffer: " + stored + "/" + cap + " CFE").formatted(Formatting.RED));
+                int shownStored = Math.max(0, Math.min(cap > 0 ? cap : Integer.MAX_VALUE, animatedPowerBufferStoredCfe));
+                lines.add(Text.literal("Buffer: " + shownStored + "/" + cap + " CFE").formatted(Formatting.RED));
 
                 if (required > 0) {
                     lines.add(Text.literal("Using: " + animatedUsing + " CFE/t").formatted(Formatting.RED));
@@ -497,7 +572,7 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
             return;
         }
 
-        if (isHoveringSlot(relX, relY, SLOT_SILK_X, SLOT_ROW0_Y)) {
+        if (isHoveringSlot(relX, relY, SLOT_SILK_X, SLOT_ROW1_Y)) {
             if (handler.isSilkTouch()) {
                 context.drawTooltip(this.textRenderer, java.util.List.of(
                     Text.literal("Silk Touch Augment").formatted(Formatting.WHITE),
@@ -512,7 +587,7 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
             return;
         }
 
-        if (isHoveringSlot(relX, relY, SLOT_SPEED_X, SLOT_ROW0_Y)) {
+        if (isHoveringSlot(relX, relY, SLOT_SPEED_X, SLOT_ROW1_Y)) {
             if (handler.getSpeedLevel() > 0) {
                 context.drawTooltip(this.textRenderer, java.util.List.of(
                     Text.literal("Speed Augment (Tier " + handler.getSpeedLevel() + ")").formatted(Formatting.WHITE),
@@ -521,6 +596,23 @@ public class QuarryControllerScreen extends HandledScreen<QuarryControllerScreen
             } else {
                 context.drawTooltip(this.textRenderer, java.util.List.of(
                     Text.literal("Speed Augment").formatted(Formatting.WHITE),
+                    Text.literal("Drag augment into this slot").formatted(Formatting.DARK_GRAY)
+                ), mouseX, mouseY);
+            }
+            return;
+        }
+
+        if (isHoveringSlot(relX, relY, SLOT_FORTUNE_X, SLOT_ROW1_Y)) {
+            if (handler.getFortuneLevel() > 0) {
+                context.drawTooltip(this.textRenderer, java.util.List.of(
+                    Text.literal("Fortune Augment (Tier " + handler.getFortuneLevel() + ")").formatted(Formatting.WHITE),
+                    Text.literal("Mutually exclusive with Silk Touch").formatted(Formatting.GRAY),
+                    Text.literal("Left-click to remove").formatted(Formatting.DARK_GRAY)
+                ), mouseX, mouseY);
+            } else {
+                context.drawTooltip(this.textRenderer, java.util.List.of(
+                    Text.literal("Fortune Augment").formatted(Formatting.WHITE),
+                    Text.literal("Mutually exclusive with Silk Touch").formatted(Formatting.GRAY),
                     Text.literal("Drag augment into this slot").formatted(Formatting.DARK_GRAY)
                 ), mouseX, mouseY);
             }

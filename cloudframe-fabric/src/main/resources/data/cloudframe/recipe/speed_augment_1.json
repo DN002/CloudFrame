@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " S ",
+    " R ",
+    "   "
+  ],
+  "key": {
+    "S": "minecraft:sugar",
+    "R": "minecraft:redstone"
+  },
+  "result": {
+    "count": 1,
+    "id": "cloudframe:speed_augment_1"
+  }
+}

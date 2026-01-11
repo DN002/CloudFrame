@@ -1,0 +1,16 @@
+{
+  "parent": "minecraft:recipes/root",
+  "criteria": {
+    "has_iron_hoe": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          { "items": ["minecraft:iron_hoe"] }
+        ]
+      }
+    }
+  },
+  "rewards": {
+    "recipes": ["cloudframe:wrench"]
+  }
+}

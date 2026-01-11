@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " L ",
+    " B ",
+    "   "
+  ],
+  "key": {
+    "L": "minecraft:lapis_lazuli",
+    "B": "minecraft:book"
+  },
+  "result": {
+    "count": 1,
+    "id": "cloudframe:fortune_augment_1"
+  }
+}

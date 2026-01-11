@@ -1,0 +1,16 @@
+{
+  "parent": "minecraft:recipes/root",
+  "criteria": {
+    "has_gold": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          { "items": ["minecraft:gold_ingot"] }
+        ]
+      }
+    }
+  },
+  "rewards": {
+    "recipes": ["cloudframe:speed_augment_2"]
+  }
+}

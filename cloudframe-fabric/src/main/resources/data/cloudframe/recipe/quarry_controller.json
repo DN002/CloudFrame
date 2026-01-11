@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " C ",
+    " G ",
+    "   "
+  ],
+  "key": {
+    "C": "minecraft:copper_block",
+    "G": "minecraft:gold_ingot"
+  },
+  "result": {
+    "count": 1,
+    "id": "cloudframe:quarry_controller"
+  }
+}

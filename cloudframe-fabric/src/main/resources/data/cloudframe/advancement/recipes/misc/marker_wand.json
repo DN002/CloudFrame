@@ -1,0 +1,16 @@
+{
+  "parent": "minecraft:recipes/root",
+  "criteria": {
+    "has_blaze_rod": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          { "items": ["minecraft:blaze_rod"] }
+        ]
+      }
+    }
+  },
+  "rewards": {
+    "recipes": ["cloudframe:marker_wand"]
+  }
+}

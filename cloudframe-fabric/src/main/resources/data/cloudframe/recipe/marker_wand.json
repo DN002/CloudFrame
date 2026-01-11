@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " B ",
+    " L ",
+    "   "
+  ],
+  "key": {
+    "B": "minecraft:blaze_rod",
+    "L": "minecraft:lapis_lazuli"
+  },
+  "result": {
+    "count": 1,
+    "id": "cloudframe:marker"
+  }
+}

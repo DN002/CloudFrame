@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " C ",
+    " R ",
+    "   "
+  ],
+  "key": {
+    "C": "minecraft:copper_block",
+    "R": "minecraft:redstone"
+  },
+  "result": {
+    "count": 8,
+    "id": "cloudframe:cloud_cable"
+  }
+}

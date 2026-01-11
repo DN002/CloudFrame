@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " I ",
+    " R ",
+    "   "
+  ],
+  "key": {
+    "I": "minecraft:iron_hoe",
+    "R": "minecraft:redstone"
+  },
+  "result": {
+    "count": 1,
+    "id": "cloudframe:wrench"
+  }
+}

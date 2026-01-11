@@ -53,6 +53,17 @@ public final class AugmentBooks {
         return stack;
     }
 
+    public static ItemStack fortune(int tier) {
+        int t = Math.max(1, Math.min(3, tier));
+        ItemStack stack = new ItemStack(Items.ENCHANTED_BOOK);
+        NbtCompound root = new NbtCompound();
+        root.putString(NBT_KIND, "fortune");
+        root.putInt(NBT_TIER, t);
+        writeRoot(stack, root);
+        stack.set(DataComponentTypes.CUSTOM_NAME, Text.literal("Fortune Augment (Tier " + t + ")"));
+        return stack;
+    }
+
     public static boolean isSilkTouch(ItemStack stack) {
         if (stack == null || stack.isEmpty() || !stack.isOf(Items.ENCHANTED_BOOK)) return false;
         NbtCompound root = readRoot(stack);
@@ -68,6 +79,18 @@ public final class AugmentBooks {
         NbtCompound root = readRoot(stack);
         if (root == null) return 0;
         if (!"speed".equals(root.getString(NBT_KIND).orElse(""))) return 0;
+        int tier = root.getInt(NBT_TIER).orElse(0);
+        return Math.max(1, Math.min(3, tier));
+    }
+
+    /**
+     * @return fortune tier 1..3, or 0 if not a fortune augment book.
+     */
+    public static int fortuneTier(ItemStack stack) {
+        if (stack == null || stack.isEmpty() || !stack.isOf(Items.ENCHANTED_BOOK)) return 0;
+        NbtCompound root = readRoot(stack);
+        if (root == null) return 0;
+        if (!"fortune".equals(root.getString(NBT_KIND).orElse(""))) return 0;
         int tier = root.getInt(NBT_TIER).orElse(0);
         return Math.max(1, Math.min(3, tier));
     }

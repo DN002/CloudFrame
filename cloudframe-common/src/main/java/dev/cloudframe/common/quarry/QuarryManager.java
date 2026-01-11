@@ -50,8 +50,8 @@ public class QuarryManager {
             conn.createStatement().executeUpdate("DELETE FROM quarries");
             var ps = conn.prepareStatement("""
                 INSERT INTO quarries
-                (owner, ownerName, world, ax, ay, az, bx, by, bz, controllerX, controllerY, controllerZ, active, controllerYaw, silkTouch, speedLevel, outputRoundRobin, redstoneMode, chunkLoadingEnabled, silentMode, frameMinX, frameMinZ, frameMaxX, frameMaxZ)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (owner, ownerName, world, ax, ay, az, bx, by, bz, controllerX, controllerY, controllerZ, active, controllerYaw, silkTouch, speedLevel, fortuneLevel, outputRoundRobin, redstoneMode, chunkLoadingEnabled, silentMode, frameMinX, frameMinZ, frameMaxX, frameMaxZ)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """);
             for (Quarry q : quarries) {
                 bindQuarryInsert(ps, q);
@@ -87,8 +87,8 @@ public class QuarryManager {
 
             var ins = conn.prepareStatement("""
                 INSERT INTO quarries
-                (owner, ownerName, world, ax, ay, az, bx, by, bz, controllerX, controllerY, controllerZ, active, controllerYaw, silkTouch, speedLevel, outputRoundRobin, redstoneMode, chunkLoadingEnabled, silentMode, frameMinX, frameMinZ, frameMaxX, frameMaxZ)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (owner, ownerName, world, ax, ay, az, bx, by, bz, controllerX, controllerY, controllerZ, active, controllerYaw, silkTouch, speedLevel, fortuneLevel, outputRoundRobin, redstoneMode, chunkLoadingEnabled, silentMode, frameMinX, frameMinZ, frameMaxX, frameMaxZ)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """);
             bindQuarryInsert(ins, q);
             ins.executeUpdate();
@@ -141,14 +141,15 @@ public class QuarryManager {
         ps.setInt(14, q.getControllerYaw());
         ps.setInt(15, q.hasSilkTouchAugment() ? 1 : 0);
         ps.setInt(16, Math.max(0, q.getSpeedAugmentLevel()));
-        ps.setInt(17, q.isOutputRoundRobin() ? 1 : 0);
-        ps.setInt(18, q.getRedstoneMode());
-        ps.setInt(19, q.isChunkLoadingEnabled() ? 1 : 0);
-        ps.setInt(20, q.isSilentMode() ? 1 : 0);
-        ps.setInt(21, q.frameMinX());
-        ps.setInt(22, q.frameMinZ());
-        ps.setInt(23, q.frameMaxX());
-        ps.setInt(24, q.frameMaxZ());
+        ps.setInt(17, Math.max(0, q.getFortuneAugmentLevel()));
+        ps.setInt(18, q.isOutputRoundRobin() ? 1 : 0);
+        ps.setInt(19, q.getRedstoneMode());
+        ps.setInt(20, q.isChunkLoadingEnabled() ? 1 : 0);
+        ps.setInt(21, q.isSilentMode() ? 1 : 0);
+        ps.setInt(22, q.frameMinX());
+        ps.setInt(23, q.frameMinZ());
+        ps.setInt(24, q.frameMaxX());
+        ps.setInt(25, q.frameMaxZ());
     }
 
     public void loadAll() {
@@ -214,6 +215,14 @@ public class QuarryManager {
                     // Older DBs won't have this column.
                 }
                 q.setSpeedAugmentLevel(speedLevel);
+
+                int fortuneLevel = 0;
+                try {
+                    fortuneLevel = rs.getInt("fortuneLevel");
+                } catch (java.sql.SQLException ignored) {
+                    // Older DBs won't have this column.
+                }
+                q.setFortuneAugmentLevel(fortuneLevel);
 
                 boolean outputRoundRobin = true;
                 try {

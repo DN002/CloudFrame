@@ -84,6 +84,13 @@ public class PipeFilterItem extends Item {
 
         // Only meaningful on inventory sides.
         BlockPos neighbor = tubePos.offset(side);
+        if (CloudFrameContent.getQuarryControllerBlock() != null) {
+            var neighborState = world.getBlockState(neighbor);
+            if (neighborState != null && neighborState.isOf(CloudFrameContent.getQuarryControllerBlock())) {
+                serverPlayer.sendMessage(Text.literal("§cPipe filters cannot be installed on sides facing the Quarry Controller. §7Install filters on the output end near chests/trash instead."), true);
+                return ActionResult.SUCCESS;
+            }
+        }
         var be = world.getBlockEntity(neighbor);
         if (!(be instanceof Inventory)) {
             serverPlayer.sendMessage(Text.literal("§7No inventory on that side."), true);

@@ -3,6 +3,8 @@ package dev.cloudframe.fabric.power;
 import dev.cloudframe.fabric.content.CloudFrameContent;
 import dev.cloudframe.fabric.CloudFrameFabric;
 import dev.cloudframe.common.quarry.Quarry;
+import dev.cloudframe.common.power.probe.PowerProbeSnapshot;
+import dev.cloudframe.common.power.probe.PowerProbeType;
 import dev.cloudframe.fabric.quarry.controller.QuarryControllerBlockEntity;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.block.BlockState;
@@ -35,7 +37,7 @@ public final class PowerProbeServer {
 
         BlockState state = world.getBlockState(pos);
 
-        int type = PowerProbePackets.TYPE_NONE;
+        PowerProbeType type = PowerProbeType.NONE;
         long produced = 0L;
         long stored = 0L;
         boolean externalApiPresent = EnergyInterop.isAvailable();
@@ -44,7 +46,7 @@ public final class PowerProbeServer {
         long externalCapacity = 0L;
 
         if (CloudFrameContent.getCloudCableBlock() != null && state.isOf(CloudFrameContent.getCloudCableBlock())) {
-            type = PowerProbePackets.TYPE_CABLE;
+            type = PowerProbeType.CABLE;
             FabricPowerNetworkManager.CableProbeInfo info = FabricPowerNetworkManager.measureCableNetworkForProbe(
                 server,
                 GlobalPos.create(world.getRegistryKey(), pos)
@@ -56,7 +58,7 @@ public final class PowerProbeServer {
             externalStored = info.externalStoredCfe();
             externalCapacity = info.externalCapacityCfe();
         } else if (CloudFrameContent.getQuarryControllerBlock() != null && state.isOf(CloudFrameContent.getQuarryControllerBlock())) {
-            type = PowerProbePackets.TYPE_QUARRY_CONTROLLER;
+            type = PowerProbeType.QUARRY_CONTROLLER;
             CloudFrameFabric inst = CloudFrameFabric.instance();
             GlobalPos controllerLoc = GlobalPos.create(world.getRegistryKey(), pos.toImmutable());
             Quarry q = (inst != null && inst.getQuarryManager() != null)
@@ -101,22 +103,33 @@ public final class PowerProbeServer {
             externalEndpointCount = controllerState;
             externalCapacity = 0L;
         } else if (CloudFrameContent.getStratusPanelBlock() != null && state.isOf(CloudFrameContent.getStratusPanelBlock())) {
-            type = PowerProbePackets.TYPE_STRATUS_PANEL;
+            type = PowerProbeType.STRATUS_PANEL;
             produced = FabricPowerNetworkManager.measureStratusPanelCfePerTick(world, pos);
         } else if (CloudFrameContent.getCloudTurbineBlock() != null && state.isOf(CloudFrameContent.getCloudTurbineBlock())) {
-            type = PowerProbePackets.TYPE_CLOUD_TURBINE;
+            type = PowerProbeType.CLOUD_TURBINE;
             produced = FabricPowerNetworkManager.measureCloudTurbineCfePerTick();
         }
 
-        ServerPlayNetworking.send(player, new PowerProbeResponsePayload(
+        PowerProbeSnapshot snap = new PowerProbeSnapshot(
             pos.asLong(),
             type,
             produced,
             stored,
-            externalApiPresent ? 1 : 0,
+            externalApiPresent,
             externalEndpointCount,
             externalStored,
             externalCapacity
+        );
+
+        ServerPlayNetworking.send(player, new PowerProbeResponsePayload(
+            snap.posLong(),
+            snap.type().legacyId(),
+            snap.producedCfePerTick(),
+            snap.storedCfe(),
+            snap.externalApiPresent() ? 1 : 0,
+            snap.externalEndpointCount(),
+            snap.externalStoredCfe(),
+            snap.externalCapacityCfe()
         ));
     }
 }

@@ -1,5 +1,6 @@
 package dev.cloudframe.fabric.content.trash;
 
+import dev.cloudframe.common.trash.TrashSink;
 import dev.cloudframe.fabric.content.CloudFrameContent;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.entity.BlockEntity;
@@ -18,7 +19,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.collection.DefaultedList;
 
-public class TrashCanBlockEntity extends BlockEntity implements Inventory, NamedScreenHandlerFactory {
+public class TrashCanBlockEntity extends BlockEntity implements Inventory, NamedScreenHandlerFactory, TrashSink {
 
     private static final int SLOT_COUNT = 9;
 
@@ -90,6 +91,14 @@ public class TrashCanBlockEntity extends BlockEntity implements Inventory, Named
         }
 
         return stack.getCount();
+    }
+
+    @Override
+    public int accept(Object itemStack) {
+        if (itemStack instanceof ItemStack stack) {
+            return accept(stack);
+        }
+        return 0;
     }
 
     // Inventory (9-slot, read-only for players; insertion is via pipes/quarry)

@@ -171,6 +171,19 @@ public class Database {
                 // Column already exists (or table is new).
             }
 
+            // Power cells table (prototype Bukkit storage for Cloud Cells).
+            // Fabric stores cell energy in block entity NBT; Bukkit needs a persistence layer.
+            stmt.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS power_cells (
+                    world TEXT NOT NULL,
+                    x INTEGER NOT NULL,
+                    y INTEGER NOT NULL,
+                    z INTEGER NOT NULL,
+                    stored_cfe INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (world, x, y, z)
+                );
+            """);
+
             // Pipe filters (per-side)
             // items is a serialized 27-slot list of item identifiers.
             stmt.executeUpdate("""

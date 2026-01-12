@@ -27,7 +27,7 @@ import dev.cloudframe.fabric.content.TubeBlock;
 import dev.cloudframe.fabric.pipes.FabricItemStackAdapter;
 import dev.cloudframe.fabric.power.FabricPowerNetworkManager;
 import dev.cloudframe.fabric.content.CloudFrameContent;
-import dev.cloudframe.fabric.content.trash.TrashCanBlockEntity;
+import dev.cloudframe.common.trash.TrashSink;
 import dev.cloudframe.fabric.quarry.controller.QuarryControllerBlockEntity;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
@@ -697,8 +697,8 @@ public class FabricQuarryPlatform implements QuarryPlatform {
 
     @Override
     public int addToInventory(Object inventoryHolder, Object itemStack) {
-        if (inventoryHolder instanceof TrashCanBlockEntity trash && itemStack instanceof ItemStack stack) {
-            return trash.accept(stack);
+        if (inventoryHolder instanceof TrashSink trash) {
+            return trash.accept(itemStack);
         }
         if (!(inventoryHolder instanceof Inventory inv)) return 0;
         if (!(itemStack instanceof ItemStack stack)) return 0;
@@ -708,7 +708,7 @@ public class FabricQuarryPlatform implements QuarryPlatform {
 
     @Override
     public int totalRoomFor(Object inventoryHolder, Object itemStack) {
-        if (inventoryHolder instanceof TrashCanBlockEntity && itemStack instanceof ItemStack stack) {
+        if (inventoryHolder instanceof TrashSink && itemStack instanceof ItemStack stack) {
             // Always accept full stack; this is a sink.
             return Math.max(0, stack.getCount());
         }
@@ -720,7 +720,7 @@ public class FabricQuarryPlatform implements QuarryPlatform {
 
     @Override
     public int emptySlotCount(Object inventoryHolder) {
-        if (inventoryHolder instanceof TrashCanBlockEntity) {
+        if (inventoryHolder instanceof TrashSink) {
             return 1;
         }
         if (!(inventoryHolder instanceof Inventory inv)) return 0;

@@ -7,16 +7,19 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
 import dev.cloudframe.bukkit.quarry.BukkitQuarryPlatform;
-import dev.cloudframe.bukkit.tubes.BukkitItemDeliveryProvider;
-import dev.cloudframe.bukkit.tubes.BukkitItemStackAdapter;
-import dev.cloudframe.bukkit.tubes.BukkitSimpleTubeVisuals;
-import dev.cloudframe.bukkit.tubes.BukkitPacketVisuals;
-import dev.cloudframe.bukkit.tubes.BukkitTubeLocationAdapter;
-import dev.cloudframe.bukkit.tubes.BukkitPacketService;
+import dev.cloudframe.bukkit.pipes.BukkitItemDeliveryProvider;
+import dev.cloudframe.bukkit.pipes.BukkitItemStackAdapter;
+import dev.cloudframe.bukkit.pipes.BukkitSimplePipeVisuals;
+import dev.cloudframe.bukkit.pipes.BukkitPacketVisuals;
+import dev.cloudframe.bukkit.pipes.BukkitPipeLocationAdapter;
+import dev.cloudframe.bukkit.pipes.BukkitPacketService;
+import dev.cloudframe.bukkit.power.BukkitPowerCellRepository;
+import dev.cloudframe.bukkit.power.BukkitPowerConfigAccess;
+import dev.cloudframe.bukkit.power.BukkitPowerNetworkAdapter;
 import dev.cloudframe.common.quarry.QuarryManager;
 import dev.cloudframe.common.storage.Database;
-import dev.cloudframe.common.tubes.ItemPacketManager;
-import dev.cloudframe.common.tubes.TubeNetworkManager;
+import dev.cloudframe.common.pipes.ItemPacketManager;
+import dev.cloudframe.common.pipes.PipeNetworkManager;
 import dev.cloudframe.common.util.Debug;
 import dev.cloudframe.common.util.DebugFile;
 import dev.cloudframe.common.util.DebugManager;
@@ -29,21 +32,24 @@ import dev.cloudframe.common.util.DebugManager;
 public class CloudFrameBukkit extends JavaPlugin {
 
     private static Debug debug;
-    private TubeNetworkManager tubeManager;
+    private PipeNetworkManager pipeManager;
     private ItemPacketManager packetManager;
     private BukkitPacketVisuals packetVisuals;
     private BukkitItemStackAdapter itemStackAdapter;
     private BukkitTask packetTickTask;
     private BukkitPacketService packetService;
-    private BukkitTubeLocationAdapter tubeLocationAdapter;
+    private BukkitPipeLocationAdapter pipeLocationAdapter;
     private QuarryManager quarryManager;
     private BukkitTask quarryTickTask;
+    private BukkitQuarryPlatform quarryPlatform;
 
     @Override
     public void onEnable() {
         if (!getDataFolder().exists()) {
             getDataFolder().mkdirs();
         }
+
+        saveDefaultConfig();
 
         // Initialize debug system - creates debug.log in plugin folder
         DebugFile.init(getDataFolder().getAbsolutePath());
@@ -61,11 +67,11 @@ public class CloudFrameBukkit extends JavaPlugin {
             return;
         }
 
-        // Instantiate tube network manager with Bukkit adapters
-        tubeLocationAdapter = new BukkitTubeLocationAdapter();
-        tubeManager = new TubeNetworkManager(tubeLocationAdapter);
-        tubeManager.setVisuals(new BukkitSimpleTubeVisuals(this, tubeManager, tubeLocationAdapter));
-        tubeManager.loadAll();
+        // Instantiate pipe network manager with Bukkit adapters
+        pipeLocationAdapter = new BukkitPipeLocationAdapter();
+        pipeManager = new PipeNetworkManager(pipeLocationAdapter);
+        pipeManager.setVisuals(new BukkitSimplePipeVisuals(this, pipeManager, pipeLocationAdapter));
+        pipeManager.loadAll();
 
         // Item packet routing (visuals + delivery)
         packetVisuals = new BukkitPacketVisuals();
@@ -84,7 +90,18 @@ public class CloudFrameBukkit extends JavaPlugin {
         }, 1L, 1L);
 
         // Quarry manager with platform adapter
-        BukkitQuarryPlatform quarryPlatform = new BukkitQuarryPlatform(tubeManager, packetManager, packetService);
+        quarryPlatform = new BukkitQuarryPlatform(pipeManager, packetManager, packetService);
+
+        // Optional power prototype (vanilla Materials + SQLite-backed cell storage).
+        boolean powerEnabled = getConfig().getBoolean("power.enabled", false);
+        if (powerEnabled) {
+            BukkitPowerCellRepository.ensureSchema();
+            BukkitPowerConfigAccess powerAccess = BukkitPowerConfigAccess.fromConfig(getConfig().getConfigurationSection("power"), new BukkitPowerCellRepository());
+            BukkitPowerNetworkAdapter powerAdapter = new BukkitPowerNetworkAdapter(powerAccess);
+            quarryPlatform.setPowerAdapter(powerAdapter, true);
+            getLogger().info("[CloudFrame] Power enabled (prototype mappings). Place cables/cells/producers per config.yml.");
+        }
+
         quarryManager = new QuarryManager(quarryPlatform);
         quarryManager.loadAll();
 
@@ -92,7 +109,9 @@ public class CloudFrameBukkit extends JavaPlugin {
         quarryTickTask = getServer().getScheduler().runTaskTimer(this, () -> {
             try {
                 boolean shouldLog = getServer().getCurrentTick() % 20 == 0;
+                quarryPlatform.onTickStart(getServer().getCurrentTick());
                 quarryManager.tickAll(shouldLog);
+                quarryPlatform.onTickEnd();
             } catch (Exception ex) {
                 getLogger().warning("Quarry tick error: " + ex.getMessage());
                 ex.printStackTrace();
@@ -124,10 +143,10 @@ public class CloudFrameBukkit extends JavaPlugin {
             quarryManager.saveAll();
         }
 
-        if (tubeManager != null) {
-            tubeManager.saveAll();
-            if (tubeManager.visualsManager() != null) {
-                tubeManager.visualsManager().shutdown();
+        if (pipeManager != null) {
+            pipeManager.saveAll();
+            if (pipeManager.visualsManager() != null) {
+                pipeManager.visualsManager().shutdown();
             }
         }
 
@@ -136,10 +155,12 @@ public class CloudFrameBukkit extends JavaPlugin {
         }
 
         quarryManager = null;
+        pipeManager = null;
         packetManager = null;
         packetVisuals = null;
         itemStackAdapter = null;
         packetService = null;
+        pipeLocationAdapter = null;
 
         Database.close();
         
@@ -152,10 +173,6 @@ public class CloudFrameBukkit extends JavaPlugin {
         // - Clean up entities
     }
 
-    public TubeNetworkManager getTubeManager() {
-        return tubeManager;
-    }
-
     public ItemPacketManager getPacketManager() {
         return packetManager;
     }
@@ -166,5 +183,9 @@ public class CloudFrameBukkit extends JavaPlugin {
 
     public QuarryManager getQuarryManager() {
         return quarryManager;
+    }
+
+    public PipeNetworkManager getPipeManager() {
+        return pipeManager;
     }
 }

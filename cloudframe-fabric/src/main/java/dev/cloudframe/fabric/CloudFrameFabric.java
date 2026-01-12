@@ -2,6 +2,8 @@ package dev.cloudframe.fabric;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import dev.cloudframe.common.ids.CloudFrameIds;
 import dev.cloudframe.common.util.DebugFile;
 import dev.cloudframe.common.util.DebugManager;
 import dev.cloudframe.common.util.Debug;
@@ -53,7 +55,7 @@ import java.util.Collection;
  */
 public class CloudFrameFabric implements ModInitializer {
 
-    public static final String MOD_ID = "cloudframe";
+    public static final String MOD_ID = CloudFrameIds.MOD_ID;
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
     private static Debug debug;
 
@@ -107,7 +109,7 @@ public class CloudFrameFabric implements ModInitializer {
                     int cloudframeCount = 0;
                     for (var entry : recipeManager.values()) {
                         var id = entry.id();
-                        if (id != null && id.getValue().getNamespace().equals("cloudframe")) {
+                        if (id != null && id.getValue().getNamespace().equals(MOD_ID)) {
                             cloudframeCount++;
                         }
                     }
@@ -340,7 +342,7 @@ public class CloudFrameFabric implements ModInitializer {
         int cloudframeCount = 0;
         for (var entry : server.getRecipeManager().values()) {
             var id = entry.id();
-            if (id != null && "cloudframe".equals(id.getValue().getNamespace())) {
+            if (id != null && MOD_ID.equals(id.getValue().getNamespace())) {
                 cloudframeCount++;
             }
         }
@@ -352,7 +354,7 @@ public class CloudFrameFabric implements ModInitializer {
         if (server == null) return out;
         for (var entry : server.getRecipeManager().values()) {
             var id = entry.id();
-            if (id != null && "cloudframe".equals(id.getValue().getNamespace())) {
+            if (id != null && MOD_ID.equals(id.getValue().getNamespace())) {
                 out.add(entry);
             }
         }

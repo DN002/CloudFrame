@@ -58,6 +58,15 @@ processResources {
 	}
 }
 
+sourceSets {
+	main {
+		resources {
+			// Shared assets (models/textures/lang) live outside the Fabric module.
+			srcDir "../cloudframe-assets/src/main/resources"
+		}
+	}
+}
+
 tasks.withType(JavaCompile).configureEach {
 	it.options.release = 21
 }

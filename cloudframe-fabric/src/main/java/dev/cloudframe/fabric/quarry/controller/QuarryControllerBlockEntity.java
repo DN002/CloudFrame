@@ -1,9 +1,11 @@
 package dev.cloudframe.fabric.quarry.controller;
 
 import dev.cloudframe.common.quarry.Quarry;
+import dev.cloudframe.common.quarry.augments.QuarryAugments;
 import dev.cloudframe.fabric.CloudFrameFabric;
 import dev.cloudframe.fabric.power.FabricPowerNetworkManager;
 import dev.cloudframe.fabric.content.CloudFrameContent;
+import dev.cloudframe.fabric.quarry.FabricQuarryAugmentResolver;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.Block;
@@ -135,22 +137,21 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
                 return;
             }
 
+            QuarryAugments aug = FabricQuarryAugmentResolver.resolve(stack);
+            if (aug == null) return;
+
             if (slot == 0) {
                 // Mutual exclusion: silk touch disables fortune.
                 if (fortuneLevel > 0) {
                     return;
                 }
-                if (dev.cloudframe.fabric.content.AugmentBooks.isSilkTouch(stack)
-                    || stack.getItem() instanceof dev.cloudframe.fabric.content.augments.SilkTouchAugmentItem) {
+                if (aug.silkTouch()) {
                     silkAugmentStack = stack.copy();
                     silkAugmentStack.setCount(1);
                     setSilkTouch(true);
                 }
             } else if (slot == 1) {
-                int tier = dev.cloudframe.fabric.content.AugmentBooks.speedTier(stack);
-                if (tier <= 0 && stack.getItem() instanceof dev.cloudframe.fabric.content.augments.SpeedAugmentItem speed) {
-                    tier = speed.tier();
-                }
+                int tier = aug.speedTier();
                 if (tier > 0) {
                     speedAugmentStack = stack.copy();
                     speedAugmentStack.setCount(1);
@@ -161,10 +162,7 @@ public class QuarryControllerBlockEntity extends BlockEntity implements NamedScr
                 if (silkTouch) {
                     return;
                 }
-                int tier = dev.cloudframe.fabric.content.AugmentBooks.fortuneTier(stack);
-                if (tier <= 0 && stack.getItem() instanceof dev.cloudframe.fabric.content.augments.FortuneAugmentItem fortune) {
-                    tier = fortune.tier();
-                }
+                int tier = aug.fortuneTier();
                 if (tier > 0) {
                     fortuneAugmentStack = stack.copy();
                     fortuneAugmentStack.setCount(1);

@@ -1,6 +1,7 @@
 package dev.cloudframe.fabric.power;
 
 import dev.cloudframe.fabric.CloudFrameFabric;
+import dev.cloudframe.common.ids.CloudFrameIds;
 import net.minecraft.network.RegistryByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.codec.PacketCodecs;
@@ -19,7 +20,7 @@ public record PowerProbeResponsePayload(
 ) implements CustomPayload {
 
     public static final CustomPayload.Id<PowerProbeResponsePayload> ID = new CustomPayload.Id<>(
-        Identifier.of(CloudFrameFabric.MOD_ID, "power_probe_response")
+        Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.POWER_PROBE_RESPONSE)
     );
 
     public static final PacketCodec<RegistryByteBuf, PowerProbeResponsePayload> CODEC = PacketCodec.tuple(

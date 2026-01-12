@@ -13,6 +13,7 @@ import dev.cloudframe.fabric.pipes.filter.PipeFilterScreenHandler;
 import dev.cloudframe.fabric.content.trash.TrashCanBlock;
 import dev.cloudframe.fabric.content.trash.TrashCanBlockEntity;
 import dev.cloudframe.fabric.content.trash.TrashCanScreenHandler;
+import dev.cloudframe.common.ids.CloudFrameIds;
 import net.fabricmc.fabric.api.itemgroup.v1.FabricItemGroup;
 import net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityTypeBuilder;
 import net.minecraft.block.Block;
@@ -37,23 +38,23 @@ public final class CloudFrameContent {
     private CloudFrameContent() {
     }
 
-    public static final Identifier CLOUD_PIPE_ID = Identifier.of(CloudFrameFabric.MOD_ID, "cloud_pipe");
-    public static final Identifier CLOUD_CABLE_ID = Identifier.of(CloudFrameFabric.MOD_ID, "cloud_cable");
-    public static final Identifier STRATUS_PANEL_ID = Identifier.of(CloudFrameFabric.MOD_ID, "stratus_panel");
-    public static final Identifier CLOUD_TURBINE_ID = Identifier.of(CloudFrameFabric.MOD_ID, "cloud_turbine");
-    public static final Identifier CLOUD_CELL_ID = Identifier.of(CloudFrameFabric.MOD_ID, "cloud_cell");
-    public static final Identifier CONTROLLER_ID = Identifier.of(CloudFrameFabric.MOD_ID, "quarry_controller");
-    public static final Identifier MARKER_ID = Identifier.of(CloudFrameFabric.MOD_ID, "marker");
-    public static final Identifier WRENCH_ID = Identifier.of(CloudFrameFabric.MOD_ID, "wrench");
-    public static final Identifier PIPE_FILTER_ID = Identifier.of(CloudFrameFabric.MOD_ID, "pipe_filter");
-    public static final Identifier TRASH_CAN_ID = Identifier.of(CloudFrameFabric.MOD_ID, "trash_can");
-    public static final Identifier SILK_TOUCH_AUGMENT_ID = Identifier.of(CloudFrameFabric.MOD_ID, "silk_touch_augment");
-    public static final Identifier SPEED_AUGMENT_1_ID = Identifier.of(CloudFrameFabric.MOD_ID, "speed_augment_1");
-    public static final Identifier SPEED_AUGMENT_2_ID = Identifier.of(CloudFrameFabric.MOD_ID, "speed_augment_2");
-    public static final Identifier SPEED_AUGMENT_3_ID = Identifier.of(CloudFrameFabric.MOD_ID, "speed_augment_3");
-    public static final Identifier FORTUNE_AUGMENT_1_ID = Identifier.of(CloudFrameFabric.MOD_ID, "fortune_augment_1");
-    public static final Identifier FORTUNE_AUGMENT_2_ID = Identifier.of(CloudFrameFabric.MOD_ID, "fortune_augment_2");
-    public static final Identifier FORTUNE_AUGMENT_3_ID = Identifier.of(CloudFrameFabric.MOD_ID, "fortune_augment_3");
+    public static final Identifier CLOUD_PIPE_ID = Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.CLOUD_PIPE);
+    public static final Identifier CLOUD_CABLE_ID = Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.CLOUD_CABLE);
+    public static final Identifier STRATUS_PANEL_ID = Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.STRATUS_PANEL);
+    public static final Identifier CLOUD_TURBINE_ID = Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.CLOUD_TURBINE);
+    public static final Identifier CLOUD_CELL_ID = Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.CLOUD_CELL);
+    public static final Identifier CONTROLLER_ID = Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.QUARRY_CONTROLLER);
+    public static final Identifier MARKER_ID = Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.MARKER);
+    public static final Identifier WRENCH_ID = Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.WRENCH);
+    public static final Identifier PIPE_FILTER_ID = Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.PIPE_FILTER);
+    public static final Identifier TRASH_CAN_ID = Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.TRASH_CAN);
+    public static final Identifier SILK_TOUCH_AUGMENT_ID = Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.SILK_TOUCH_AUGMENT);
+    public static final Identifier SPEED_AUGMENT_1_ID = Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.SPEED_AUGMENT_1);
+    public static final Identifier SPEED_AUGMENT_2_ID = Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.SPEED_AUGMENT_2);
+    public static final Identifier SPEED_AUGMENT_3_ID = Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.SPEED_AUGMENT_3);
+    public static final Identifier FORTUNE_AUGMENT_1_ID = Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.FORTUNE_AUGMENT_1);
+    public static final Identifier FORTUNE_AUGMENT_2_ID = Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.FORTUNE_AUGMENT_2);
+    public static final Identifier FORTUNE_AUGMENT_3_ID = Identifier.of(CloudFrameFabric.MOD_ID, CloudFrameIds.FORTUNE_AUGMENT_3);
 
     public static Block CLOUD_PIPE_BLOCK;
     public static Block CLOUD_CABLE_BLOCK;

@@ -1,0 +1,16 @@
+# CloudFrame Bukkit configuration
+
+power:
+  # If true, quarries require power and will draw CFE from nearby cable networks.
+  enabled: false
+
+  # Prototype block mapping (vanilla Materials) used to represent power components on Bukkit.
+  # These are placeholders until Bukkit gets real custom blocks.
+  blocks:
+    cable: END_ROD
+    stratus_panel: DAYLIGHT_DETECTOR
+    cloud_turbine: LIGHTNING_ROD
+    cloud_cell: LODESTONE
+
+  # Power cell capacity in CFE (prototype storage model stored in SQLite).
+  cell_capacity_cfe: 1000000

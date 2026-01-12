@@ -3,6 +3,8 @@ package dev.cloudframe.fabric.quarry.controller;
 import dev.cloudframe.fabric.content.CloudFrameContent;
 import dev.cloudframe.fabric.CloudFrameFabric;
 import dev.cloudframe.common.quarry.Quarry;
+import dev.cloudframe.common.quarry.augments.QuarryAugments;
+import dev.cloudframe.fabric.quarry.FabricQuarryAugmentResolver;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.inventory.Inventory;
@@ -657,20 +659,10 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
         }
 
         // From player inventory -> appropriate augment slot
-        boolean isSilk = dev.cloudframe.fabric.content.AugmentBooks.isSilkTouch(original)
-            || original.getItem() instanceof dev.cloudframe.fabric.content.augments.SilkTouchAugmentItem;
-
-        int speedTier = dev.cloudframe.fabric.content.AugmentBooks.speedTier(original);
-        if (speedTier <= 0 && original.getItem() instanceof dev.cloudframe.fabric.content.augments.SpeedAugmentItem speed) {
-            speedTier = speed.tier();
-        }
-        boolean isSpeed = speedTier > 0;
-
-        int fortuneTier = dev.cloudframe.fabric.content.AugmentBooks.fortuneTier(original);
-        if (fortuneTier <= 0 && original.getItem() instanceof dev.cloudframe.fabric.content.augments.FortuneAugmentItem fortune) {
-            fortuneTier = fortune.tier();
-        }
-        boolean isFortune = fortuneTier > 0;
+        QuarryAugments aug = FabricQuarryAugmentResolver.resolve(original);
+        boolean isSilk = aug != null && aug.silkTouch();
+        boolean isSpeed = aug != null && aug.speedTier() > 0;
+        boolean isFortune = aug != null && aug.fortuneTier() > 0;
 
         if (isSilk) {
             if (be != null && be.getFortuneLevel() > 0) {
@@ -718,14 +710,9 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
             && !this.getCursorStack().isEmpty()) {
 
             ItemStack cursor = this.getCursorStack();
-            boolean cursorSilk = dev.cloudframe.fabric.content.AugmentBooks.isSilkTouch(cursor)
-                || cursor.getItem() instanceof dev.cloudframe.fabric.content.augments.SilkTouchAugmentItem;
-
-            int cursorFortuneTier = dev.cloudframe.fabric.content.AugmentBooks.fortuneTier(cursor);
-            if (cursorFortuneTier <= 0 && cursor.getItem() instanceof dev.cloudframe.fabric.content.augments.FortuneAugmentItem fortune) {
-                cursorFortuneTier = fortune.tier();
-            }
-            boolean cursorFortune = cursorFortuneTier > 0;
+            QuarryAugments aug = FabricQuarryAugmentResolver.resolve(cursor);
+            boolean cursorSilk = aug != null && aug.silkTouch();
+            boolean cursorFortune = aug != null && aug.fortuneTier() > 0;
 
             if (slotIndex == SILK_SLOT_INDEX && cursorSilk && be.getFortuneLevel() > 0) {
                 player.sendMessage(Text.literal("Cannot install Silk Touch while Fortune is installed").formatted(net.minecraft.util.Formatting.RED), false);
@@ -794,27 +781,21 @@ public class QuarryControllerScreenHandler extends ScreenHandler {
         public boolean canInsert(ItemStack stack) {
             if (stack == null || stack.isEmpty()) return false;
 
+            QuarryAugments aug = FabricQuarryAugmentResolver.resolve(stack);
+            if (aug == null) return false;
+
             if (this.getIndex() == SILK_SLOT_INDEX) {
                 if (be != null && be.getFortuneLevel() > 0) return false;
-                return dev.cloudframe.fabric.content.AugmentBooks.isSilkTouch(stack)
-                    || stack.getItem() instanceof dev.cloudframe.fabric.content.augments.SilkTouchAugmentItem;
+                return aug.silkTouch();
             }
 
             if (this.getIndex() == SPEED_SLOT_INDEX) {
-                int tier = dev.cloudframe.fabric.content.AugmentBooks.speedTier(stack);
-                if (tier <= 0 && stack.getItem() instanceof dev.cloudframe.fabric.content.augments.SpeedAugmentItem speed) {
-                    tier = speed.tier();
-                }
-                return tier > 0;
+                return aug.speedTier() > 0;
             }
 
             if (this.getIndex() == FORTUNE_SLOT_INDEX) {
                 if (be != null && be.isSilkTouch()) return false;
-                int tier = dev.cloudframe.fabric.content.AugmentBooks.fortuneTier(stack);
-                if (tier <= 0 && stack.getItem() instanceof dev.cloudframe.fabric.content.augments.FortuneAugmentItem fortune) {
-                    tier = fortune.tier();
-                }
-                return tier > 0;
+                return aug.fortuneTier() > 0;
             }
 
             return false;

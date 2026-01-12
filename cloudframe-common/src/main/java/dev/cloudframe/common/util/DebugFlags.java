@@ -23,4 +23,7 @@ public class DebugFlags {
 
     // Pick-block diagnostics; enabled by default until stable.
     public static boolean PICKBLOCK_LOGGING = true;
+
+    // Very spammy per-click wrench interaction logs; keep off by default.
+    public static boolean WRENCH_USE_LOGGING = false;
 }

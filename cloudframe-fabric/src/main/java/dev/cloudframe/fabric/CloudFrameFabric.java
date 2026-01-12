@@ -47,6 +47,7 @@ import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * CloudFrame Fabric Mod - Multi-platform version
@@ -57,6 +58,9 @@ public class CloudFrameFabric implements ModInitializer {
 
     public static final String MOD_ID = CloudFrameIds.MOD_ID;
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+
+    // Manual build stamp to help validate which jar is running when the mod version is unchanged.
+    public static final String BUILD_STAMP = "wrench-shift-rotate-2026-01-12-01";
     private static Debug debug;
 
     private static CloudFrameFabric INSTANCE;
@@ -70,8 +74,14 @@ public class CloudFrameFabric implements ModInitializer {
     private dev.cloudframe.fabric.pipes.FabricPipeFilterManager pipeFilterManager;
     private PipeConnectionService pipeConnectionService;
     private MinecraftServer server;
-    private boolean commandsRegistered = false;
+    private final AtomicBoolean commandsRegistered = new AtomicBoolean(false);
     private int tickCounter = 0;
+
+    private dev.cloudframe.fabric.config.WrenchConfig wrenchConfig;
+
+    public dev.cloudframe.fabric.config.WrenchConfig getWrenchConfig() {
+        return wrenchConfig;
+    }
 
     /**
      * Called when the mod initializes.
@@ -87,9 +97,21 @@ public class CloudFrameFabric implements ModInitializer {
         debug = DebugManager.get(CloudFrameFabric.class);
 
         debug.log("onInitialize", "Fabric mod initializing...");
+        debug.log("onInitialize", "Build stamp: " + BUILD_STAMP);
 
         debug.log("onInitialize", "CloudFrame Fabric 2.0.0 initializing");
         debug.log("onInitialize", "Debug logging initialized to: " + configDir);
+
+        // Load server-owner configurable settings (wrench rotation + debug flags)
+        // from the same CloudFrame folder as debug.log/cloudframe.db.
+        try {
+            var loaded = dev.cloudframe.fabric.config.CloudFrameConfigFile.loadOrCreate(configDir.resolve("config.txt"), debug);
+            wrenchConfig = loaded.wrenchConfig();
+            debug.log("onInitialize", "Config loaded from config.txt");
+        } catch (Throwable t) {
+            wrenchConfig = new dev.cloudframe.fabric.config.WrenchConfig();
+            debug.log("onInitialize", "Config load failed: " + t);
+        }
 
         EnvType envType = FabricLoader.getInstance().getEnvironmentType();
         debug.log("onInitialize", "Fabric environment type: " + envType);
@@ -130,11 +152,13 @@ public class CloudFrameFabric implements ModInitializer {
         // Commands - try CommandRegistrationCallback
         debug.log("commands", "Registering CommandRegistrationCallback");
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+            if (commandsRegistered.get()) return;
             debug.log("commands", "CommandRegistrationCallback fired! environment=" + environment);
             try {
                 CloudFrameCommands.register(dispatcher);
-                commandsRegistered = true;
-                debug.log("commands", "Commands registered successfully via CommandRegistrationCallback");
+                if (commandsRegistered.compareAndSet(false, true)) {
+                    debug.log("commands", "Commands registered successfully via CommandRegistrationCallback");
+                }
             } catch (Exception ex) {
                 LOGGER.error("[CloudFrame] Exception registering commands in callback: {}", ex.getMessage());
                 debug.log("commands", "Exception in callback: " + ex.getMessage());
@@ -251,6 +275,10 @@ public class CloudFrameFabric implements ModInitializer {
         dev.cloudframe.fabric.listeners.FabricWrenchMarkerActivationListener.register();
         debug.log("onInitialize", "Wrench marker activation listener registered");
 
+        // Wrench shift-right-click rotation interception (so it works on blocks with GUIs).
+        dev.cloudframe.fabric.listeners.FabricWrenchRotateIoListener.register();
+        debug.log("onInitialize", "Wrench shift-rotate listener registered");
+
         // Deactivate frames when marker blocks are broken
         dev.cloudframe.fabric.listeners.MarkerBlockBreakListener.register();
         debug.log("onInitialize", "Marker block break listener registered");
@@ -273,14 +301,12 @@ public class CloudFrameFabric implements ModInitializer {
         }
 
         // Fallback: if CommandRegistrationCallback didn't register, do it now
-        if (!commandsRegistered) {
+        if (!commandsRegistered.get()) {
             debug.log("commands", "CommandRegistrationCallback did not register commands, attempting fallback registration");
-            debug.log("commands", "CommandRegistrationCallback did not register commands, registering in onServerStarted fallback");
             try {
                 CloudFrameCommands.register(server.getCommandManager().getDispatcher());
-                commandsRegistered = true;
+                commandsRegistered.set(true);
                 boolean present = server.getCommandManager().getDispatcher().getRoot().getChild("cloudframe") != null;
-                debug.log("commands", "Commands registered via fallback. Command node present: " + present);
                 debug.log("commands", "Commands registered via fallback. Command node present: " + present);
             } catch (Exception ex) {
                 LOGGER.error("[CloudFrame] FATAL: Failed to register commands in fallback: {}", ex.getMessage());
@@ -288,7 +314,6 @@ public class CloudFrameFabric implements ModInitializer {
                 ex.printStackTrace();
             }
         } else {
-            debug.log("commands", "Commands already registered via callback");
             debug.log("commands", "Commands already registered via callback");
         }
 
